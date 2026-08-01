@@ -65,6 +65,20 @@ public sealed class RegistryService(IElevationService elevation) : IRegistryServ
         }
     }
 
+    public string[] GetValueNames(RegistryRoot root, string subKey)
+    {
+        try
+        {
+            using var baseKey = root.Open();
+            using var key = baseKey.OpenSubKey(subKey);
+            return key?.GetValueNames() ?? [];
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            return [];
+        }
+    }
+
     public bool IsApplied(IReadOnlyList<RegistryValueSpec> specs)
     {
         if (specs.Count == 0) return false;

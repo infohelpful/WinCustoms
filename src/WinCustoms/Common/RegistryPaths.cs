@@ -31,6 +31,7 @@ public static class RegistryPaths
 
     // ── 사용자 클래스(우클릭 메뉴) ─────────────────────────────
     public const string ClassesRootUser = @"Software\Classes";
+    public const string ClassesRootMachine = @"SOFTWARE\Classes";
     public const string AllFilesShell = @"Software\Classes\*\shell";
     public const string DirectoryShell = @"Software\Classes\Directory\shell";
     public const string DirectoryBackgroundShell = @"Software\Classes\Directory\Background\shell";
@@ -38,6 +39,15 @@ public static class RegistryPaths
 
     /// <summary>WinCustoms 가 만든 우클릭 항목 접두사. 삭제 시 자신의 항목만 안전하게 골라낼 수 있다.</summary>
     public const string ContextEntryPrefix = "WinCustoms.";
+
+    /// <summary>셸 동사 키에 이 값이 있으면 메뉴에 그려지지 않는다. 값을 지우면 그대로 되살아난다.</summary>
+    public const string LegacyDisableValue = "LegacyDisable";
+
+    /// <summary>설계상 메뉴에 노출되지 않고 프로그램에서만 호출되는 동사임을 뜻한다.</summary>
+    public const string ProgrammaticAccessOnlyValue = "ProgrammaticAccessOnly";
+
+    /// <summary>shellex 컨텍스트 메뉴 처리기가 등록되는 하위 경로.</summary>
+    public const string ContextMenuHandlersSuffix = @"shellex\ContextMenuHandlers";
 
     // ── 작업 표시줄 / 검색 ─────────────────────────────────────
     public const string SearchKey = @"Software\Microsoft\Windows\CurrentVersion\Search";

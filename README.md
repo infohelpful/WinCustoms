@@ -10,7 +10,7 @@ Windows 11 최적화 · 트윅 유틸리티. WinUI 3 (Windows App SDK) + .NET 9 
 | 카테고리 | 주요 항목 |
 | --- | --- |
 | 탐색기 · 우클릭 | Windows 10 클래식 우클릭 메뉴, 홈/갤러리 숨김, 리본 UI, '내 PC'로 열기, 확장명·숨김 파일 표시, Compact 보기 |
-| 우클릭 프로그램 등록 | 원하는 `.exe` 를 파일/폴더/폴더 배경 우클릭 메뉴에 추가·삭제 |
+| 우클릭 프로그램 등록 및 제거 | 메뉴에 올라온 항목을 훑어 토글로 숨김·복원, 원하는 `.exe` 를 파일/폴더/폴더 배경 메뉴에 추가·삭제 |
 | 작업 표시줄 · 시작 | 왼쪽 정렬, 위젯/검색/작업 보기/Copilot 아이콘 숨김, 시계 초 표시, Bing 웹 검색 차단, '추천' 영역 정리, Open-Shell 안내 |
 | 개인정보 · 광고 | 텔레메트리·광고 ID 차단, Copilot/Recall 비활성화, Edge 백그라운드 상주 차단 |
 | 기본 앱 정리 | Xbox · Solitaire · 뉴스 · Teams 등 24종 화이트리스트 기반 선택 제거 |
@@ -73,6 +73,7 @@ src/WinCustoms/
 │   ├── MaintenanceService.cs     전원 구성표 · 임시 파일 · 복원 지점
 │   ├── AppxService.cs            기본 앱 목록/제거
 │   ├── ContextMenuService.cs     사용자 우클릭 항목 등록/제거
+│   ├── ShellMenuInventoryService.cs  시스템 전체 우클릭 항목 수집 · 숨김/복원
 │   ├── DialogService.cs          ContentDialog · 파일 피커
 │   ├── TweakEngine.cs            배치 실행 · 오류 수집 · 재시작 필요 판단
 │   └── Catalog/                  카테고리별 트윅 정의 (partial 분할)
@@ -80,6 +81,8 @@ src/WinCustoms/
 ├── ViewModels/                   MainViewModel + 카테고리별 뷰모델
 └── Views/                        TweakListPage(공용) · ContextMenuEditorPage · DebloatPage · SettingsPage
 ```
+
+`ContextMenuEditorPage` 는 SelectorBar 로 두 탭을 나눈다. 기본은 **제거** 탭이고, **등록** 탭이 두 번째다.
 
 ---
 
@@ -206,6 +209,26 @@ Windows 11 의 새 컨텍스트 메뉴는 CLSID `{86ca1aa0-34aa-4e8b-a509-50c905
 
 키만 만들고 기본값을 설정하지 않으면 동작하지 않는다는 점이 흔한 함정입니다.
 복원은 CLSID 키를 통째로 삭제하면 되므로 시스템 파일이나 HKLM 은 전혀 건드리지 않습니다.
+
+### 우클릭 항목을 지우지 않고 숨기는 방법
+
+'제거' 탭은 키를 삭제하지 않는다. 프로그램을 재설치하면 되살아나는 데다, 잘못 지웠을 때
+되돌릴 방법이 사라지기 때문이다. 대신 등록 방식에 따라 두 가지 수단을 쓴다.
+
+| 등록 방식 | 위치 | 숨기는 법 | 되돌리는 법 |
+| --- | --- | --- | --- |
+| 동사(verb) | `<클래스>\shell\<동사>` | `LegacyDisable` 값을 빈 문자열로 추가 | 값 삭제 |
+| 셸 확장(shellex) | `<클래스>\shellex\ContextMenuHandlers\…` | 차단 목록에 CLSID 추가 | 값 삭제 |
+
+차단 목록은 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` 하나뿐이라
+셸 확장을 끄고 켤 때는 반드시 UAC 가 뜬다. 이미 탐색기에 로드된 DLL 은 즉시 내려가지 않으므로
+'탐색기 다시 시작'을 한 번 눌러야 반영된다. 동사 쪽은 UAC 없이 바로 반영된다(HKCU 항목인 경우).
+
+같은 프로그램이 파일·폴더·폴더 배경·드라이브에 따로 등록하는 일이 흔해서, 동사는 이름으로 묶어
+한 항목으로 보여주고 토글 한 번에 모든 범위를 함께 처리한다.
+
+실행 파일이 Windows 폴더 안에 있으면 OS 기본 항목으로 보고 기본 목록에서 감춘다.
+`powershell.exe` 처럼 경로 없이 등록된 명령은 System32 와 PATH 를 뒤져 실제 파일을 찾은 뒤 판단한다.
 
 ### 왜 앱 전체를 관리자로 띄우지 않나
 

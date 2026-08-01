@@ -28,6 +28,23 @@ internal static partial class NativeMethods
     [LibraryImport("shell32.dll", EntryPoint = "SetCurrentProcessExplicitAppUserModelID", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial int SetCurrentProcessExplicitAppUserModelID(string appId);
 
+    [LibraryImport("shlwapi.dll", EntryPoint = "SHLoadIndirectString", StringMarshalling = StringMarshalling.Utf16)]
+    private static unsafe partial int SHLoadIndirectString(string source, char* buffer, int bufferLength, nint reserved);
+
+    /// <summary>
+    /// <c>@shell32.dll,-8506</c> 형태의 간접 문자열을 실제 표시 문자열로 바꾼다.
+    /// 셸 동사의 MUIVerb 는 대부분 이 형식이라 원문 그대로 쓰면 리소스 참조가 화면에 노출된다.
+    /// </summary>
+    internal static unsafe string? LoadIndirectString(string source)
+    {
+        const int capacity = 512;
+        var buffer = stackalloc char[capacity];
+
+        return SHLoadIndirectString(source, buffer, capacity, 0) == 0
+            ? new string(buffer)
+            : null;
+    }
+
     internal static void BroadcastSettingChange(string area)
         => SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, area, SMTO_ABORTIFHUNG, 1000, out _);
 

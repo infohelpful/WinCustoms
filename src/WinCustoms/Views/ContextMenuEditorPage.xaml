@@ -6,6 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:common="using:WinCustoms.Common"
+    xmlns:services="using:WinCustoms.Services"
     xmlns:views="using:WinCustoms.Views"
     mc:Ignorable="d">
 
@@ -16,13 +17,153 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="24,16,24,12" Spacing="2">
-            <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="우클릭 프로그램 등록" />
-            <TextBlock Style="{StaticResource PageSubtitleTextStyle}"
-                       Text="자주 쓰는 프로그램을 마우스 오른쪽 버튼 메뉴에 추가합니다. HKCU 범위에만 기록하므로 관리자 권한이 필요 없습니다." />
+        <StackPanel Grid.Row="0" Margin="24,16,24,4" Spacing="2">
+            <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="우클릭 프로그램 등록 및 제거" />
+            <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{x:Bind ViewModel.Subtitle, Mode=OneWay}" />
+
+            <SelectorBar SelectionChanged="OnTabSelectionChanged" Margin="-12,8,0,0">
+                <SelectorBarItem Text="제거" IsSelected="True">
+                    <SelectorBarItem.Icon>
+                        <FontIcon Glyph="&#xE71D;" />
+                    </SelectorBarItem.Icon>
+                </SelectorBarItem>
+
+                <SelectorBarItem Text="등록">
+                    <SelectorBarItem.Icon>
+                        <FontIcon Glyph="&#xE710;" />
+                    </SelectorBarItem.Icon>
+                </SelectorBarItem>
+            </SelectorBar>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" Padding="24,0,24,16" VerticalScrollBarVisibility="Auto">
+        <!-- ══ 제거 탭 ═══════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsRemoveTabSelected), Mode=OneWay}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="24,8,24,12" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBox Grid.Column="0"
+                         MaxWidth="320"
+                         HorizontalAlignment="Left"
+                         PlaceholderText="이름 또는 경로로 검색"
+                         Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                               VerticalAlignment="Center"
+                               Margin="0"
+                               Text="{x:Bind ViewModel.InventorySummary, Mode=OneWay}" />
+
+                    <CheckBox Content="Windows 기본 항목도 표시"
+                              MinWidth="0"
+                              IsChecked="{x:Bind ViewModel.ShowSystemEntries, Mode=TwoWay}" />
+                </StackPanel>
+            </Grid>
+
+            <ProgressRing Grid.Row="1"
+                          Width="32" Height="32"
+                          Margin="0,40,0,0"
+                          VerticalAlignment="Top"
+                          HorizontalAlignment="Center"
+                          IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
+                          Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsScanning), Mode=OneWay}" />
+
+            <InfoBar Grid.Row="1"
+                     Margin="24,0,24,0"
+                     VerticalAlignment="Top"
+                     IsClosable="False"
+                     Severity="Informational"
+                     Title="표시할 항목이 없습니다"
+                     Message="{x:Bind ViewModel.EmptyInventoryMessage, Mode=OneWay}"
+                     IsOpen="{x:Bind views:XamlHelpers.Neither(ViewModel.IsScanning, ViewModel.HasInstalledEntries), Mode=OneWay}" />
+
+            <ScrollViewer Grid.Row="1"
+                          Padding="24,0,24,16"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.HasInstalledEntries), Mode=OneWay}">
+                <ItemsControl ItemsSource="{x:Bind ViewModel.InstalledEntries, Mode=OneWay}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="6" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="services:ShellMenuEntry">
+                            <Border Style="{StaticResource TweakCardStyle}" Padding="16,12">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="{x:Bind DisplayName}"
+                                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" />
+
+                                            <Border Style="{StaticResource BadgeBorderStyle}"
+                                                    Visibility="{x:Bind views:XamlHelpers.Show(IsOwn)}">
+                                                <TextBlock Style="{StaticResource BadgeTextStyle}" Text="WinCustoms 등록" />
+                                            </Border>
+
+                                            <Border Style="{StaticResource BadgeBorderStyle}"
+                                                    Visibility="{x:Bind views:XamlHelpers.Show(IsSystem)}">
+                                                <TextBlock Style="{StaticResource BadgeTextStyle}" Text="Windows 기본" />
+                                            </Border>
+
+                                            <Border Style="{StaticResource BadgeBorderStyle}"
+                                                    Visibility="{x:Bind views:XamlHelpers.Show(NeedsElevation)}">
+                                                <TextBlock Style="{StaticResource BadgeTextStyle}" Text="관리자 권한" />
+                                            </Border>
+
+                                            <Border Style="{StaticResource BadgeBorderStyle}">
+                                                <TextBlock Style="{StaticResource BadgeTextStyle}" Text="{x:Bind ScopeText}" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <TextBlock Text="{x:Bind Detail}"
+                                                   Style="{StaticResource DescriptionTextStyle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1"
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                VerticalAlignment="Center">
+                                        <ProgressRing Width="18" Height="18"
+                                                      VerticalAlignment="Center"
+                                                      IsActive="{x:Bind IsBusy, Mode=OneWay}"
+                                                      Visibility="{x:Bind views:XamlHelpers.Show(IsBusy), Mode=OneWay}" />
+
+                                        <ToggleSwitch MinWidth="0"
+                                                      OnContent="표시"
+                                                      OffContent="숨김"
+                                                      IsOn="{x:Bind IsEnabled, Mode=TwoWay}"
+                                                      Toggled="OnEntryToggled" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ══ 등록 탭 ═══════════════════════════════════════════════ -->
+        <ScrollViewer Grid.Row="1"
+                      Padding="24,8,24,16"
+                      VerticalScrollBarVisibility="Auto"
+                      Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsRegisterTabSelected), Mode=OneWay}">
             <StackPanel Spacing="12">
 
                 <!-- ── 새 항목 추가 ─────────────────────────────── -->
@@ -129,9 +270,13 @@
                                   Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsBusy), Mode=OneWay}"
                                   Width="20" Height="20" VerticalAlignment="Center" />
 
+                    <Button Content="목록 새로 고침"
+                            Command="{x:Bind ViewModel.ScanCommand}"
+                            Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsRemoveTabSelected), Mode=OneWay}" />
+
                     <Button Content="탐색기 다시 시작"
                             Command="{x:Bind ViewModel.RestartExplorerCommand}"
-                            ToolTipService.ToolTip="변경 사항이 바로 보이지 않으면 눌러 주세요." />
+                            ToolTipService.ToolTip="변경 사항이 바로 보이지 않으면 눌러 주세요. 셸 확장 항목은 반드시 한 번 눌러야 반영됩니다." />
                 </StackPanel>
             </Grid>
         </Border>

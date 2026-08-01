@@ -74,7 +74,7 @@
                         IsSettingsVisible="False"
                         IsPaneToggleButtonVisible="True"
                         PaneDisplayMode="Left"
-                        OpenPaneLength="248"
+                        OpenPaneLength="286"
                         SelectionChanged="OnNavigationSelectionChanged">
 
             <NavigationView.MenuItems>
@@ -86,9 +86,9 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="우클릭 프로그램 등록"
+                <NavigationViewItem Content="우클릭 프로그램 등록 및 제거"
                                     Tag="contextmenu"
-                                    ToolTipService.ToolTip="자주 쓰는 프로그램을 우클릭 메뉴에 추가합니다.">
+                                    ToolTipService.ToolTip="우클릭 메뉴에 올라온 항목을 숨기거나, 자주 쓰는 프로그램을 새로 추가합니다.">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE710;" />
                     </NavigationViewItem.Icon>

@@ -19,6 +19,7 @@ internal static class ServiceConfiguration
         services.AddSingleton<IMaintenanceService, MaintenanceService>();
         services.AddSingleton<IAppxService, AppxService>();
         services.AddSingleton<IContextMenuService, ContextMenuService>();
+        services.AddSingleton<IShellMenuInventoryService, ShellMenuInventoryService>();
         services.AddSingleton<IDialogService, DialogService>();
         services.AddSingleton<ITweakEngine, TweakEngine>();
 

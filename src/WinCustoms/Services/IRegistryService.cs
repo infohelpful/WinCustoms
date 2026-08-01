@@ -16,6 +16,8 @@ public interface IRegistryService
 
     string[] GetSubKeyNames(RegistryRoot root, string subKey);
 
+    string[] GetValueNames(RegistryRoot root, string subKey);
+
     /// <summary>지정한 스펙들이 모두 "적용된 값"과 일치하는지 확인한다.</summary>
     bool IsApplied(IReadOnlyList<RegistryValueSpec> specs);
 

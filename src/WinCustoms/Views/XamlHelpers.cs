@@ -19,6 +19,8 @@ public static class XamlHelpers
 
     public static bool Not(bool value) => !value;
 
+    public static bool Neither(bool first, bool second) => !first && !second;
+
     public static bool IsPositive(int value) => value > 0;
 
     public static string RiskLabel(TweakRisk risk) => risk switch
