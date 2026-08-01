@@ -1,38 +1,59 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    WinCustoms 배포본을 빌드하고 GitHub Releases 에 올린다.
+    WinCustoms 를 빌드해서 GitHub Releases 에 올린다. 버전은 자동으로 올라간다.
 
 .DESCRIPTION
-    Native AOT 로 게시 → 필수 파일 검증 → 실행 확인 → zip 압축 → 릴리스 생성 순으로 진행한다.
-    중간에 하나라도 실패하면 업로드까지 가지 않고 멈춘다.
+    버전 결정 → 게시 → 검증 → 실행 확인 → zip → 버전 커밋/푸시 → 릴리스 생성 순으로 진행한다.
+    중간에 하나라도 실패하면 csproj 를 원래대로 되돌리고 멈춘다. 반쯤 올라간 상태는 남지 않는다.
+
+    버전 규칙:
+      - csproj 의 현재 버전이 아직 릴리스되지 않았으면 그 버전을 그대로 쓴다.
+      - 이미 릴리스된 버전이면 끝자리를 1 올린다 (1.0.0 → 1.0.1).
+      - -Minor / -Major / -Version 을 주면 그 지시를 따른다.
+
+.PARAMETER Minor
+    끝자리 대신 가운데 자리를 올린다 (1.0.3 → 1.1.0). 기능을 추가했을 때 쓴다.
+
+.PARAMETER Major
+    맨 앞자리를 올린다 (1.4.2 → 2.0.0). 크게 갈아엎었을 때 쓴다.
 
 .PARAMETER Version
-    릴리스 버전. 생략하면 csproj 의 <Version> 값을 쓴다.
+    버전을 직접 지정한다. 예: -Version 2.0.0
 
 .PARAMETER Draft
-    공개하지 않고 초안(draft) 으로 만든다. 내용을 확인한 뒤 웹에서 게시할 때 쓴다.
+    공개하지 않고 초안으로 만든다. 내용을 확인한 뒤 웹에서 [Publish] 를 눌러 게시한다.
 
 .PARAMETER SkipUpload
-    zip 까지만 만들고 GitHub 업로드는 하지 않는다. 결과물만 확인하고 싶을 때 쓴다.
+    빌드와 zip 까지만 한다. 버전도 올리지 않고 커밋도 하지 않는다.
 
 .PARAMETER SkipSmokeTest
     게시된 exe 를 실제로 띄워 보는 검증을 건너뛴다.
 
-.EXAMPLE
-    .\scripts\release.ps1 -SkipUpload
-    빌드와 zip 까지만 해 보고 결과물을 확인한다.
+.PARAMETER ShowVersion
+    다음 릴리스가 몇 번이 될지만 알려 주고 끝낸다. 아무것도 바꾸지 않는다.
 
 .EXAMPLE
     .\scripts\release.ps1
-    csproj 버전으로 태그를 만들고 릴리스를 게시한다.
+    버그를 고쳤을 때. 1.0.0 이 이미 나가 있으면 1.0.1 로 올려서 배포한다.
+
+.EXAMPLE
+    .\scripts\release.ps1 -Minor
+    기능을 추가했을 때. 1.0.3 → 1.1.0
+
+.EXAMPLE
+    .\scripts\release.ps1 -SkipUpload
+    결과물만 확인. 아무것도 올리지 않고 버전도 그대로 둔다.
 #>
 [CmdletBinding()]
 param(
+    [switch]$Minor,
+    [switch]$Major,
     [string]$Version,
     [switch]$Draft,
     [switch]$SkipUpload,
-    [switch]$SkipSmokeTest
+    [switch]$SkipSmokeTest,
+    [switch]$ShowVersion
 )
 
 Set-StrictMode -Version Latest
@@ -47,9 +68,47 @@ $Project    = Join-Path $Root 'src\WinCustoms\WinCustoms.csproj'
 $PublishDir = Join-Path $Root 'publish'
 $DistDir    = Join-Path $Root 'dist'
 
+# 실패했을 때 csproj 를 되돌리기 위한 원본. 커밋에 성공하면 비운다.
+$script:CsprojOriginal = $null
+
 function Step([string]$text) { Write-Host ''; Write-Host "==> $text" -ForegroundColor Cyan }
 function Note([string]$text) { Write-Host "    $text" -ForegroundColor DarkGray }
+
+<#
+    외부 명령을 출력 없이 실행하고 종료 코드만 돌려준다.
+    ErrorActionPreference 가 Stop 이면 네이티브 명령이 stderr 에 한 줄만 써도
+    PowerShell 이 NativeCommandError 로 스크립트를 끝내 버린다.
+    "없으면 없다고 알려 주는" 조회성 명령에는 그 동작이 곤란하므로 잠시 꺼 둔다.
+#>
+function RunQuiet([string]$exe, [string[]]$cmdArgs) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $exe @cmdArgs 2>&1 | Out-Null
+        return $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previous }
+}
+
+<#
+    해당 버전이 이미 세상에 나갔는지 본다.
+    보통은 태그로 확인되지만, 초안(draft) 릴리스는 게시하기 전까지 태그를 만들지 않는다.
+    초안을 만들어 둔 버전을 또 쓰면 나중에 태그가 충돌하므로 릴리스 목록도 함께 확인한다.
+#>
+function TagExists([string]$tag) {
+    if ((RunQuiet 'git' @('-C', $Root, 'rev-parse', '--verify', '--quiet', "refs/tags/$tag")) -eq 0) {
+        return $true
+    }
+
+    return (RunQuiet 'gh' @('release', 'view', $tag)) -eq 0
+}
+
 function Fail([string]$text) {
+    if ($script:CsprojOriginal) {
+        [System.IO.File]::WriteAllText($Project, $script:CsprojOriginal, (New-Object System.Text.UTF8Encoding $false))
+        Write-Host ''; Write-Host '    csproj 버전을 원래대로 되돌렸습니다.' -ForegroundColor DarkGray
+    }
+
     Write-Host ''; Write-Host "!!  $text" -ForegroundColor Red
     Pop-Location -ErrorAction SilentlyContinue
     exit 1
@@ -58,54 +117,101 @@ function Fail([string]$text) {
 # gh 는 현재 디렉터리로 대상 저장소를 판단하므로 저장소 루트에서 실행한다.
 Push-Location $Root
 
-# ── 1. 버전 결정 ──────────────────────────────────────────────
-Step '버전 확인'
+# ── 1. 사전 점검 ──────────────────────────────────────────────
+Step '사전 점검'
 
-if (-not $Version) {
-    $csproj = [xml](Get-Content -LiteralPath $Project -Raw)
-    $node = $csproj.SelectSingleNode('//PropertyGroup/Version')
-    if (-not $node) { Fail 'csproj 에서 <Version> 을 찾지 못했습니다. -Version 으로 직접 지정하세요.' }
-    $Version = $node.InnerText.Trim()
+$csprojText = [System.IO.File]::ReadAllText($Project)
+$match = [regex]::Match($csprojText, '<Version>\s*(\d+)\.(\d+)\.(\d+)\s*</Version>')
+if (-not $match.Success) {
+    Fail 'csproj 에서 <Version>x.y.z</Version> 을 찾지 못했습니다.'
 }
 
-$Tag = "v$Version"
-Note "버전 $Version (태그 $Tag)"
+$current = '{0}.{1}.{2}' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
+$reason  = ''
+Note "csproj 의 현재 버전 $current"
 
-# ── 2. 업로드 전 사전 점검 ────────────────────────────────────
-if (-not $SkipUpload) {
-    Step '저장소 상태 점검'
-
+if ($SkipUpload) {
+    # 올리지 않을 거면 버전도 건드리지 않는다.
+    $newVersion = $current
+}
+else {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         Fail 'GitHub CLI(gh) 를 찾을 수 없습니다. winget install GitHub.cli 로 설치하세요.'
     }
 
-    $dirty = git -C $Root status --porcelain
-    if ($dirty) {
-        Fail ("커밋되지 않은 변경이 있습니다. 먼저 커밋하거나 -SkipUpload 로 실행하세요.`n" + ($dirty -join "`n"))
+    # 미리보기는 아무것도 바꾸지 않으므로 작업 트리가 지저분해도 상관없다.
+    if (-not $ShowVersion) {
+        $dirty = git -C $Root status --porcelain
+        if ($dirty) {
+            Fail ("커밋되지 않은 변경이 있습니다. 먼저 커밋하세요.`n" + ($dirty -join "`n"))
+        }
     }
 
-    # 태그는 로컬이 아니라 GitHub 쪽에 생긴다. 이전 릴리스가 남긴 태그는
-    # fetch 하기 전까지 로컬에 없으므로 원격을 기준으로 확인해야 한다.
+    # 태그는 로컬이 아니라 GitHub 쪽에 생긴다. 어떤 버전이 이미 나갔는지 알려면
+    # 원격에서 태그를 받아와야 한다.
     git -C $Root fetch origin --tags --quiet
     if ($LASTEXITCODE -ne 0) { Fail 'origin 에서 fetch 하지 못했습니다. 네트워크와 원격 설정을 확인하세요.' }
 
-    git -C $Root rev-parse --verify --quiet "refs/tags/$Tag" > $null 2>&1
-    if ($LASTEXITCODE -eq 0) { Fail "태그 $Tag 가 이미 있습니다. csproj 의 <Version> 을 올리세요." }
+    # ── 2. 버전 결정 ──────────────────────────────────────────
+    # PowerShell 변수는 대소문자를 구분하지 않는다.
+    # $major 로 두면 -Major 스위치 파라미터를 덮어써서 형 변환 오류가 난다.
+    $curMajor = [int]$match.Groups[1].Value
+    $curMinor = [int]$match.Groups[2].Value
+    $curPatch = [int]$match.Groups[3].Value
 
-    # gh release create 는 태그가 없으면 "원격 기본 브랜치의 최신 커밋"에 태그를 만든다.
-    # 로컬에만 있는 커밋을 빌드하면 배포한 바이너리와 태그가 가리키는 소스가 달라지므로,
-    # HEAD 가 원격에 올라가 있는지 확인하고 아래에서 --target 으로 커밋을 못 박는다.
-    $script:HeadSha = (git -C $Root rev-parse HEAD).Trim()
-
-    $onRemote = git -C $Root branch --remotes --contains $script:HeadSha
-    if (-not $onRemote) {
-        Fail '현재 커밋이 아직 원격에 없습니다. git push 를 먼저 하세요.'
+    if ($Version) {
+        if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "버전 형식이 잘못됐습니다: $Version (예: 1.2.3)" }
+        $newVersion = $Version
+        $reason = '직접 지정'
+    }
+    elseif ($Major) {
+        $newVersion = '{0}.0.0' -f ($curMajor + 1)
+        $reason = '큰 변경'
+    }
+    elseif ($Minor) {
+        $newVersion = '{0}.{1}.0' -f $curMajor, ($curMinor + 1)
+        $reason = '기능 추가'
+    }
+    elseif (TagExists "v$current") {
+        # 현재 버전은 이미 나갔으니 다음 수정 버전으로 올린다.
+        $newVersion = '{0}.{1}.{2}' -f $curMajor, $curMinor, ($curPatch + 1)
+        $reason = "v$current 은 이미 배포됨"
+    }
+    else {
+        # 아직 한 번도 나가지 않은 버전이면 그대로 쓴다. 첫 릴리스가 여기 해당한다.
+        $newVersion = $current
+        $reason = '아직 배포되지 않은 버전'
     }
 
-    Note "작업 트리 깨끗함, 태그 사용 가능, HEAD $($script:HeadSha.Substring(0,7)) 원격에 존재"
+    if (TagExists "v$newVersion") {
+        Fail "태그 v$newVersion 이 이미 있습니다. -Version 으로 다른 버전을 지정하세요."
+    }
 }
 
-# ── 3. Native AOT 게시 ────────────────────────────────────────
+$Tag = "v$newVersion"
+$suffix = if ($reason) { " ($reason)" } else { '' }
+
+if ($ShowVersion) {
+    Step "다음 릴리스는 $Tag$suffix"
+    Pop-Location
+    exit 0
+}
+
+# ── 3. csproj 버전 갱신 ───────────────────────────────────────
+
+if ($newVersion -ne $current) {
+    Step "버전 $current → $newVersion$suffix"
+
+    # XML 로 다시 쓰면 주석과 들여쓰기가 뭉개지므로 해당 줄만 문자열로 교체한다.
+    $script:CsprojOriginal = $csprojText
+    $updated = $csprojText.Remove($match.Index, $match.Length).Insert($match.Index, "<Version>$newVersion</Version>")
+    [System.IO.File]::WriteAllText($Project, $updated, (New-Object System.Text.UTF8Encoding $false))
+}
+else {
+    Step "버전 $newVersion$suffix"
+}
+
+# ── 4. Native AOT 게시 ────────────────────────────────────────
 Step 'Native AOT 게시 (몇 분 걸릴 수 있습니다)'
 
 if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
@@ -113,7 +219,7 @@ if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
 & dotnet publish $Project -c Release -r win-x64 -o $PublishDir --nologo
 if ($LASTEXITCODE -ne 0) { Fail '게시에 실패했습니다. 위 빌드 로그를 확인하세요.' }
 
-# ── 4. 필수 파일 검증 ─────────────────────────────────────────
+# ── 5. 필수 파일 검증 ─────────────────────────────────────────
 # XBF 와 PRI 는 게시 목록에서 조용히 빠지기 쉬운 파일이다.
 # 빠진 채로 배포하면 사용자 PC 에서 실행 즉시 XamlParseException 으로 죽는다.
 Step '필수 파일 검증'
@@ -136,7 +242,7 @@ foreach ($file in $required) {
 $publishSize = [math]::Round((Get-ChildItem $PublishDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
 Note "$($required.Count)개 필수 파일 확인, 게시 폴더 $publishSize MB"
 
-# ── 5. 실행 확인 ──────────────────────────────────────────────
+# ── 6. 실행 확인 ──────────────────────────────────────────────
 if (-not $SkipSmokeTest) {
     Step '실행 확인'
 
@@ -161,9 +267,9 @@ if (-not $SkipSmokeTest) {
     Note '정상 실행 확인'
 }
 
-# ── 6. zip 압축 ───────────────────────────────────────────────
+# ── 7. zip 압축 ───────────────────────────────────────────────
 # 압축을 풀면 WinCustoms 폴더 하나가 나오도록 스테이징을 거친다.
-# 폴더 없이 242개 파일이 쏟아지면 사용자가 곤란해진다.
+# 폴더 없이 파일 수백 개가 쏟아지면 사용자가 곤란해진다.
 Step 'zip 압축'
 
 if (-not (Test-Path $DistDir)) { New-Item -ItemType Directory -Path $DistDir | Out-Null }
@@ -172,7 +278,7 @@ $stage = Join-Path $DistDir 'WinCustoms'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 Copy-Item $PublishDir $stage -Recurse
 
-$zipPath = Join-Path $DistDir "WinCustoms-$Version-win-x64.zip"
+$zipPath = Join-Path $DistDir "WinCustoms-$newVersion-win-x64.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -193,7 +299,28 @@ if ($SkipUpload) {
     exit 0
 }
 
-# ── 7. 릴리스 생성 ────────────────────────────────────────────
+# ── 8. 버전 커밋 & 푸시 ───────────────────────────────────────
+# 여기까지 왔으면 배포 가능한 물건이 나온 것이 확인됐다. 이제서야 기록을 남긴다.
+if ($script:CsprojOriginal) {
+    Step "버전 커밋 & 푸시"
+
+    git -C $Root add -- $Project
+    git -C $Root commit -m "버전 $newVersion" --quiet
+    if ($LASTEXITCODE -ne 0) { Fail '버전 커밋에 실패했습니다.' }
+
+    # 커밋에 성공했으니 되돌리기용 원본은 버린다.
+    $script:CsprojOriginal = $null
+
+    git -C $Root push origin HEAD --quiet
+    if ($LASTEXITCODE -ne 0) { Fail '푸시에 실패했습니다. git push 후 다시 실행하세요.' }
+}
+
+$headSha = (git -C $Root rev-parse HEAD).Trim()
+
+$onRemote = git -C $Root branch --remotes --contains $headSha
+if (-not $onRemote) { Fail '현재 커밋이 원격에 없습니다. git push 를 먼저 하세요.' }
+
+# ── 9. 릴리스 생성 ────────────────────────────────────────────
 Step "GitHub 릴리스 $Tag 생성"
 
 $notes = @"
@@ -222,14 +349,14 @@ $notes = @"
 | ``$(Split-Path -Leaf $zipPath)`` | $zipSize MB | ``$sha256`` |
 "@
 
-$notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "wincustoms-release-notes-$Version.md"
+$notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "wincustoms-release-notes-$newVersion.md"
 Set-Content -LiteralPath $notesFile -Value $notes -Encoding UTF8
 
 $ghArgs = @(
     'release', 'create', $Tag, $zipPath
-    '--title', "WinCustoms $Version"
+    '--title', "WinCustoms $newVersion"
     '--notes-file', $notesFile
-    '--target', $script:HeadSha   # 태그가 방금 빌드한 커밋을 정확히 가리키게 한다
+    '--target', $headSha   # 태그가 방금 빌드한 커밋을 정확히 가리키게 한다
 )
 if ($Draft) { $ghArgs += '--draft' }
 
