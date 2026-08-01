@@ -152,6 +152,15 @@ else {
     git -C $Root fetch origin --tags --quiet
     if ($LASTEXITCODE -ne 0) { Fail 'origin 에서 fetch 하지 못했습니다. 네트워크와 원격 설정을 확인하세요.' }
 
+    # 원격이 앞서 있으면 마지막 push 가 거부된다. 몇 분짜리 빌드를 헛돌리지 않도록 미리 막는다.
+    $branch = (git -C $Root rev-parse --abbrev-ref HEAD).Trim()
+    if ((RunQuiet 'git' @('-C', $Root, 'rev-parse', '--verify', '--quiet', "origin/$branch")) -eq 0) {
+        $behind = [int](git -C $Root rev-list --count "HEAD..origin/$branch").Trim()
+        if ($behind -gt 0) {
+            Fail "원격에 내 로컬보다 새 커밋이 $behind 개 있습니다. git pull 을 먼저 하세요."
+        }
+    }
+
     # ── 2. 버전 결정 ──────────────────────────────────────────
     # PowerShell 변수는 대소문자를 구분하지 않는다.
     # $major 로 두면 -Major 스위치 파라미터를 덮어써서 형 변환 오류가 난다.
@@ -299,26 +308,27 @@ if ($SkipUpload) {
     exit 0
 }
 
-# ── 8. 버전 커밋 & 푸시 ───────────────────────────────────────
+# ── 8. 커밋 & 푸시 ────────────────────────────────────────────
 # 여기까지 왔으면 배포 가능한 물건이 나온 것이 확인됐다. 이제서야 기록을 남긴다.
-if ($script:CsprojOriginal) {
-    Step "버전 커밋 & 푸시"
+Step '커밋 & 푸시'
 
+if ($script:CsprojOriginal) {
     git -C $Root add -- $Project
     git -C $Root commit -m "버전 $newVersion" --quiet
     if ($LASTEXITCODE -ne 0) { Fail '버전 커밋에 실패했습니다.' }
 
     # 커밋에 성공했으니 되돌리기용 원본은 버린다.
     $script:CsprojOriginal = $null
-
-    git -C $Root push origin HEAD --quiet
-    if ($LASTEXITCODE -ne 0) { Fail '푸시에 실패했습니다. git push 후 다시 실행하세요.' }
+    Note "버전 $newVersion 커밋"
 }
 
-$headSha = (git -C $Root rev-parse HEAD).Trim()
+# 릴리스 태그는 GitHub 쪽에 만들어지므로 대상 커밋이 원격에 있어야 한다.
+# 아직 push 하지 않은 커밋이 있어도 여기서 함께 올라간다.
+git -C $Root push origin HEAD --quiet
+if ($LASTEXITCODE -ne 0) { Fail '푸시에 실패했습니다.' }
 
-$onRemote = git -C $Root branch --remotes --contains $headSha
-if (-not $onRemote) { Fail '현재 커밋이 원격에 없습니다. git push 를 먼저 하세요.' }
+$headSha = (git -C $Root rev-parse HEAD).Trim()
+Note "origin 에 $($headSha.Substring(0, 7)) 까지 푸시됨"
 
 # ── 9. 릴리스 생성 ────────────────────────────────────────────
 Step "GitHub 릴리스 $Tag 생성"
