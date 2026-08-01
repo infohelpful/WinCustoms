@@ -49,7 +49,14 @@ $DistDir    = Join-Path $Root 'dist'
 
 function Step([string]$text) { Write-Host ''; Write-Host "==> $text" -ForegroundColor Cyan }
 function Note([string]$text) { Write-Host "    $text" -ForegroundColor DarkGray }
-function Fail([string]$text) { Write-Host ''; Write-Host "!!  $text" -ForegroundColor Red; exit 1 }
+function Fail([string]$text) {
+    Write-Host ''; Write-Host "!!  $text" -ForegroundColor Red
+    Pop-Location -ErrorAction SilentlyContinue
+    exit 1
+}
+
+# gh 는 현재 디렉터리로 대상 저장소를 판단하므로 저장소 루트에서 실행한다.
+Push-Location $Root
 
 # ── 1. 버전 결정 ──────────────────────────────────────────────
 Step '버전 확인'
@@ -77,10 +84,25 @@ if (-not $SkipUpload) {
         Fail ("커밋되지 않은 변경이 있습니다. 먼저 커밋하거나 -SkipUpload 로 실행하세요.`n" + ($dirty -join "`n"))
     }
 
-    git -C $Root rev-parse --verify --quiet "refs/tags/$Tag" > $null 2>&1
-    if ($LASTEXITCODE -eq 0) { Fail "태그 $Tag 가 이미 있습니다. 버전을 올리세요." }
+    # 태그는 로컬이 아니라 GitHub 쪽에 생긴다. 이전 릴리스가 남긴 태그는
+    # fetch 하기 전까지 로컬에 없으므로 원격을 기준으로 확인해야 한다.
+    git -C $Root fetch origin --tags --quiet
+    if ($LASTEXITCODE -ne 0) { Fail 'origin 에서 fetch 하지 못했습니다. 네트워크와 원격 설정을 확인하세요.' }
 
-    Note '작업 트리 깨끗함, 태그 사용 가능'
+    git -C $Root rev-parse --verify --quiet "refs/tags/$Tag" > $null 2>&1
+    if ($LASTEXITCODE -eq 0) { Fail "태그 $Tag 가 이미 있습니다. csproj 의 <Version> 을 올리세요." }
+
+    # gh release create 는 태그가 없으면 "원격 기본 브랜치의 최신 커밋"에 태그를 만든다.
+    # 로컬에만 있는 커밋을 빌드하면 배포한 바이너리와 태그가 가리키는 소스가 달라지므로,
+    # HEAD 가 원격에 올라가 있는지 확인하고 아래에서 --target 으로 커밋을 못 박는다.
+    $script:HeadSha = (git -C $Root rev-parse HEAD).Trim()
+
+    $onRemote = git -C $Root branch --remotes --contains $script:HeadSha
+    if (-not $onRemote) {
+        Fail '현재 커밋이 아직 원격에 없습니다. git push 를 먼저 하세요.'
+    }
+
+    Note "작업 트리 깨끗함, 태그 사용 가능, HEAD $($script:HeadSha.Substring(0,7)) 원격에 존재"
 }
 
 # ── 3. Native AOT 게시 ────────────────────────────────────────
@@ -167,6 +189,7 @@ Note "SHA256 $sha256"
 if ($SkipUpload) {
     Step '완료 (업로드 생략)'
     Note $zipPath
+    Pop-Location
     exit 0
 }
 
@@ -206,6 +229,7 @@ $ghArgs = @(
     'release', 'create', $Tag, $zipPath
     '--title', "WinCustoms $Version"
     '--notes-file', $notesFile
+    '--target', $script:HeadSha   # 태그가 방금 빌드한 커밋을 정확히 가리키게 한다
 )
 if ($Draft) { $ghArgs += '--draft' }
 
@@ -217,3 +241,8 @@ if ($ghExit -ne 0) { Fail '릴리스 생성에 실패했습니다.' }
 
 Step '완료'
 & gh release view $Tag --json url --jq '.url'
+
+# 태그는 GitHub 쪽에만 생겼으므로 로컬로 가져와 히스토리를 맞춰 둔다.
+git -C $Root fetch origin --tags --quiet
+
+Pop-Location
