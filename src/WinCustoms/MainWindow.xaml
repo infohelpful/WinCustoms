@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="WinCustoms.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="WinCustoms">
+
+    <!-- Mica: Windows 11 순정 창 배경 소재. 지원되지 않는 OS 에서는 코드 비하인드가 Acrylic 으로 대체한다. -->
+    <Window.SystemBackdrop>
+        <MicaBackdrop Kind="BaseAlt" />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ── 사용자 지정 제목 표시줄 ─────────────────────────── -->
+        <Grid Grid.Row="0" Height="48" Padding="16,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <!-- 시스템 캡션 버튼(최소화/최대화/닫기)이 차지하는 폭. 코드 비하인드가 채운다. -->
+                <ColumnDefinition x:Name="CaptionButtonsColumn" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0"
+                        Orientation="Horizontal"
+                        Spacing="10"
+                        VerticalAlignment="Center">
+                <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}"
+                          Glyph="&#xE9F5;"
+                          FontSize="16"
+                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <TextBlock Text="WinCustoms"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- SetTitleBar 에 넘긴 요소 위의 컨트롤은 클릭이 막히므로,
+                 창 이동용 영역은 비어 있는 이 Border 하나만 사용한다. -->
+            <Border x:Name="DragRegion" Grid.Column="1" Background="Transparent" />
+
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Center">
+                <Border Style="{StaticResource BadgeBorderStyle}">
+                    <TextBlock Style="{StaticResource BadgeTextStyle}"
+                               Text="{x:Bind ViewModel.ElevationText}" />
+                </Border>
+
+                <Button Command="{x:Bind ViewModel.CreateRestorePointCommand}"
+                        ToolTipService.ToolTip="트윅을 적용하기 전에 현재 상태를 복원 지점으로 저장합니다."
+                        Padding="10,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                  Glyph="&#xE7B8;"
+                                  FontSize="14" />
+                        <TextBlock Text="복원 지점" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- ── 좌측 네비게이션 ─────────────────────────────────── -->
+        <NavigationView x:Name="NavView"
+                        Grid.Row="1"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        IsPaneToggleButtonVisible="True"
+                        PaneDisplayMode="Left"
+                        OpenPaneLength="248"
+                        SelectionChanged="OnNavigationSelectionChanged">
+
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="탐색기 · 우클릭"
+                                    Tag="explorer"
+                                    ToolTipService.ToolTip="클래식 우클릭 메뉴, 홈/갤러리 숨김, 확장명 표시">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEC50;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="우클릭 프로그램 등록"
+                                    Tag="contextmenu"
+                                    ToolTipService.ToolTip="자주 쓰는 프로그램을 우클릭 메뉴에 추가합니다.">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE710;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="작업 표시줄 · 시작"
+                                    Tag="taskbar">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE90F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="개인정보 · 광고"
+                                    Tag="privacy">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE72E;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="기본 앱 정리"
+                                    Tag="debloat">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE74D;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="성능 최적화"
+                                    Tag="performance">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEC4A;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="파워유저 도구"
+                                    Tag="powertools">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE90F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Content="설정 및 백업" Tag="settings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+
+            <Frame x:Name="ContentFrame" />
+        </NavigationView>
+    </Grid>
+</Window>

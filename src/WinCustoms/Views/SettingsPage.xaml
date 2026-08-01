@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WinCustoms.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:views="using:WinCustoms.Views"
+    mc:Ignorable="d">
+
+    <ScrollViewer Padding="24,16,24,24" VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="12" MaxWidth="900" HorizontalAlignment="Left">
+
+            <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="설정 및 백업" />
+            <TextBlock Style="{StaticResource PageSubtitleTextStyle}"
+                       Text="앱 모양과 안전장치를 관리합니다." />
+
+            <!-- 테마 -->
+            <Border Style="{StaticResource TweakCardStyle}" Margin="0,8,0,0">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="앱 테마" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                                   Text="Mica 배경은 Windows 11 에서만 표시됩니다. 그 외 환경에서는 Acrylic 또는 단색으로 대체됩니다." />
+                    </StackPanel>
+
+                    <ComboBox Grid.Column="1"
+                              MinWidth="150"
+                              VerticalAlignment="Center"
+                              SelectedIndex="{x:Bind ViewModel.SelectedThemeIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="시스템 설정 따름" />
+                        <ComboBoxItem Content="라이트" />
+                        <ComboBoxItem Content="다크" />
+                    </ComboBox>
+                </Grid>
+            </Border>
+
+            <!-- 백업 -->
+            <Border Style="{StaticResource TweakCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="레지스트리 백업 폴더" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                                   Text="트윅을 적용하기 직전 상태가 .reg 파일로 자동 저장됩니다. 앱이 없어도 더블클릭 한 번으로 되돌릴 수 있습니다." />
+                        <TextBlock Text="{x:Bind ViewModel.BackupFolder}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   IsTextSelectionEnabled="True" />
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="폴더 열기"
+                            VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.OpenBackupFolderCommand}" />
+                </Grid>
+            </Border>
+
+            <!-- 탐색기 재시작 -->
+            <Border Style="{StaticResource TweakCardStyle}">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="탐색기 다시 시작" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                                   Text="적용한 트윅이 화면에 반영되지 않을 때 사용합니다. 열려 있는 폴더 창만 닫히고 다른 프로그램은 그대로 유지됩니다." />
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="다시 시작"
+                            VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.RestartExplorerCommand}" />
+                </Grid>
+            </Border>
+
+            <!-- 현황 -->
+            <Border Style="{StaticResource TweakCardStyle}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="현재 상태" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.AppliedSummary, Mode=OneWay}" Style="{StaticResource DescriptionTextStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.ElevationText}" Style="{StaticResource DescriptionTextStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.RuntimeInfo}" Style="{StaticResource DescriptionTextStyle}" />
+
+                    <Button Content="상태 새로 고침"
+                            HorizontalAlignment="Left"
+                            Margin="0,6,0,0"
+                            Command="{x:Bind ViewModel.RefreshCommand}" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap"
+                       Margin="4,8,0,0"
+                       Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                       Visibility="{x:Bind views:XamlHelpers.ShowIfText(ViewModel.StatusMessage), Mode=OneWay}" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

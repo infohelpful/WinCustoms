@@ -1,0 +1,143 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ─────────────────────────────────────────────────────────────
+       WinCustoms — Windows 11 최적화 / 트윅 유틸리티
+       WinUI 3 (Windows App SDK) · Native AOT · 단일 실행 파일
+       ───────────────────────────────────────────────────────────── -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+
+    <RootNamespace>WinCustoms</RootNamespace>
+    <AssemblyName>WinCustoms</AssemblyName>
+    <Product>WinCustoms</Product>
+    <Company>WinCustoms</Company>
+    <Version>1.0.0</Version>
+
+    <Platforms>x64;ARM64</Platforms>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">x64</Platform>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+
+    <UseWinUI>true</UseWinUI>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      preview 가 필요한 이유:
+      WinUI 3 + Native AOT 에서는 [ObservableProperty] 를 반드시 partial 프로퍼티에 붙여야
+      CsWinRT 가 WinRT 마샬링 코드를 만들어 준다(필드 방식은 MVVMTK0045 경고 + x:Bind 실패).
+      그런데 MVVM Toolkit 이 생성하는 구현부가 'field' 키워드를 쓰므로 C# preview 가 요구된다.
+      https://devblogs.microsoft.com/dotnet/announcing-the-dotnet-community-toolkit-840/
+    -->
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Deterministic>true</Deterministic>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!-- 직접 작성한 Program.Main 을 사용한다.
+         (관리자 승격 작업을 XAML 런타임 초기화 없이 헤드리스로 처리하기 위함) -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <!-- ── 언패키지(비 MSIX) 단일 exe 배포 ────────────────────────── -->
+  <PropertyGroup>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <!--
+      self-contained 배포에서는 부트스트래퍼를 켜면 안 된다.
+      부트스트래퍼는 "설치된" WindowsAppRuntime 프레임워크 패키지를 활성화하는데,
+      앱 폴더에 동봉된 런타임과 같이 로드되면 CoreMessaging 이 fail-fast 한다.
+      WinRT 활성화는 빌드 때 병합되는 registration-free 매니페스트가 담당한다.
+    -->
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+  </PropertyGroup>
+
+  <!-- ── Native AOT (Release 게시에서만 활성화) ──────────────────── -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <PublishReadyToRun>false</PublishReadyToRun>
+
+    <!-- CsWinRT 가 AOT 용 WinRT 마샬링 코드를 생성하도록 한다 (필수) -->
+    <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
+    <CsWinRTAotExportsEnabled>true</CsWinRTAotExportsEnabled>
+
+    <!-- 크기 최적화 -->
+    <!-- AOT 네이티브 PDB 는 40MB 에 육박한다. 배포본에는 넣지 않는다(Debug 빌드에는 그대로 생성됨). -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+    <StripSymbols>true</StripSymbols>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <!-- 레지스트리 값 문자열 비교에 문화권을 쓰므로 InvariantGlobalization 은 끄지 않는다 -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <!-- AOT / 트리밍 경고를 빌드 단계에서 미리 잡는다 -->
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      메타패키지(Microsoft.WindowsAppSDK) 대신 WinUI 컴포넌트 패키지만 참조한다.
+      메타패키지는 Windows ML 을 함께 끌고 와서 self-contained 게시물에
+      onnxruntime.dll(약 21MB) 과 DirectML.dll(약 18MB) 이 그대로 포함된다.
+      이 앱은 AI API 를 쓰지 않으므로 WinUI 만 참조해 약 40MB 를 덜어낸다.
+      https://github.com/microsoft/WindowsAppSDK/issues/6015
+    -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260709004" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.18" />
+  </ItemGroup>
+
+  <!--
+    XAML 마크업 컴파일러는 컴파일된 XBF 를 OutputPath 로 "복사"만 하고
+    게시 목록(ResolvedFileToPublish)에는 넣지 않는다.
+    그래서 dotnet publish 결과물에는 XBF 가 빠지고, 실행하면 곧바로
+    XamlParseException (0x802B000A) 으로 죽는다.
+    앱 리소스 인덱스(<AssemblyName>.pri) 도 같은 이유로 누락되므로 함께 채워 넣는다.
+  -->
+  <Target Name="IncludeXamlAssetsInPublish" BeforeTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_CompiledXbf Include="$(OutputPath)**\*.xbf" />
+      <_CompiledXbf Include="$(OutputPath)$(AssemblyName).pri" Condition="Exists('$(OutputPath)$(AssemblyName).pri')" />
+
+      <ResolvedFileToPublish Include="@(_CompiledXbf)">
+        <RelativePath>%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <!--
+    ILC 는 DebugType 설정과 무관하게 네이티브 PDB(약 39MB)를 만든다.
+    심볼은 bin\Release 에 그대로 남으므로 배포 폴더에서만 걷어낸다.
+    _CopyAotSymbols 가 Publish 이후에 PDB 를 다시 복사하므로 반드시 그 뒤에 걸어야 한다.
+    (MSBuild 는 타깃을 한 번만 실행하므로 Publish 를 같이 걸면 먼저 소진되어 효과가 없다.)
+  -->
+  <Target Name="RemoveNativePdbFromPublish" AfterTargets="_CopyAotSymbols" Condition="'$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <_PublishPdbFiles Include="$(PublishDir)*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_PublishPdbFiles)" />
+  </Target>
+
+</Project>

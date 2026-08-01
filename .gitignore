@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+publish/
+artifacts/
+Generated Files/
+*.binlog
