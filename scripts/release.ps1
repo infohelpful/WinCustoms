@@ -12,6 +12,10 @@
       - 이미 릴리스된 버전이면 끝자리를 1 올린다 (1.0.0 → 1.0.1).
       - -Minor / -Major / -Version 을 주면 그 지시를 따른다.
 
+.PARAMETER Message
+    커밋되지 않은 변경을 이 메시지로 전부 커밋한 뒤 배포한다.
+    주지 않으면 변경이 남아 있을 때 그냥 멈춘다.
+
 .PARAMETER Minor
     끝자리 대신 가운데 자리를 올린다 (1.0.3 → 1.1.0). 기능을 추가했을 때 쓴다.
 
@@ -34,8 +38,12 @@
     다음 릴리스가 몇 번이 될지만 알려 주고 끝낸다. 아무것도 바꾸지 않는다.
 
 .EXAMPLE
+    .\scripts\release.ps1 -Message "우클릭 메뉴 복원 오류 수정"
+    고친 내용을 커밋하고 그대로 배포한다. 가장 흔하게 쓰는 형태.
+
+.EXAMPLE
     .\scripts\release.ps1
-    버그를 고쳤을 때. 1.0.0 이 이미 나가 있으면 1.0.1 로 올려서 배포한다.
+    이미 커밋해 둔 상태에서 배포만 한다. 1.0.0 이 나가 있으면 1.0.1 로 올린다.
 
 .EXAMPLE
     .\scripts\release.ps1 -Minor
@@ -47,6 +55,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$Message,
     [switch]$Minor,
     [switch]$Major,
     [string]$Version,
@@ -142,8 +151,18 @@ else {
     # 미리보기는 아무것도 바꾸지 않으므로 작업 트리가 지저분해도 상관없다.
     if (-not $ShowVersion) {
         $dirty = git -C $Root status --porcelain
+
+        if ($dirty -and $Message) {
+            git -C $Root add -A
+            git -C $Root commit -m $Message --quiet
+            if ($LASTEXITCODE -ne 0) { Fail '커밋에 실패했습니다.' }
+
+            Note "변경 사항 $($dirty.Count)건을 커밋했습니다: $Message"
+            $dirty = $null
+        }
+
         if ($dirty) {
-            Fail ("커밋되지 않은 변경이 있습니다. 먼저 커밋하세요.`n" + ($dirty -join "`n"))
+            Fail ("커밋되지 않은 변경이 있습니다. 먼저 커밋하거나 -Message 로 커밋 메시지를 넘기세요.`n" + ($dirty -join "`n"))
         }
     }
 
