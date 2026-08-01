@@ -142,6 +142,38 @@ ARM64 기기용은 `-r win-arm64` 로 바꿔서 게시하세요.
 
 ---
 
+## 릴리스 배포
+
+`scripts\release.ps1` 이 게시부터 GitHub Releases 업로드까지 한 번에 처리합니다.
+
+```powershell
+# 결과물만 확인 (빌드 + zip 까지, 업로드 없음)
+.\scripts\release.ps1 -SkipUpload
+
+# 실제 배포 (csproj 의 <Version> 으로 v1.0.0 태그를 만들고 게시)
+.\scripts\release.ps1
+
+# 내용을 확인하고 수동으로 공개하고 싶을 때
+.\scripts\release.ps1 -Draft
+```
+
+스크립트가 순서대로 하는 일입니다.
+
+1. `csproj` 의 `<Version>` 을 읽어 태그 이름(`v1.0.0`)을 정합니다. `-Version` 으로 덮어쓸 수 있습니다.
+2. 작업 트리가 깨끗한지, 같은 태그가 이미 있는지 확인합니다. 하나라도 걸리면 빌드 전에 멈춥니다.
+3. Native AOT 로 게시합니다.
+4. **필수 파일을 검증합니다.** XBF 와 `WinCustoms.pri` 는 게시 목록에서 조용히 빠지는 일이 있는데,
+   빠진 채로 배포하면 사용자 PC 에서 실행 즉시 `XamlParseException` 으로 죽습니다.
+   빌드는 성공하고 배포본만 망가지는 유형이라 자동 검증이 필요합니다.
+5. 게시된 exe 를 실제로 띄워 창이 뜨는지 확인합니다 (`-SkipSmokeTest` 로 건너뜀).
+6. 압축을 풀면 `WinCustoms` 폴더가 나오도록 zip 으로 묶습니다 (약 23 MB).
+7. SHA256 과 설치 안내를 담은 릴리스 노트를 붙여 업로드합니다.
+
+버전을 올리려면 `csproj` 의 `<Version>` 만 수정하면 됩니다.
+`dist\` 는 `.gitignore` 에 있어 커밋되지 않습니다.
+
+---
+
 ## 동작 원리 메모
 
 ### 클래식 우클릭 메뉴는 왜 레지스트리 키 하나로 바뀌나
