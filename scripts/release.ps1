@@ -259,6 +259,8 @@ $required = @(
     'MainWindow.xbf'
     'Views\TweakListPage.xbf'
     'Microsoft.ui.xaml.dll'
+    'Assets\WinCustoms.ico'
+    'Assets\AppIcon.png'
 )
 
 foreach ($file in $required) {

@@ -33,10 +33,9 @@
                         Orientation="Horizontal"
                         Spacing="10"
                         VerticalAlignment="Center">
-                <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}"
-                          Glyph="&#xE9F5;"
-                          FontSize="16"
-                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <Image Source="ms-appx:///Assets/AppIcon.png"
+                       Width="18"
+                       Height="18" />
                 <TextBlock Text="WinCustoms"
                            Style="{StaticResource CaptionTextBlockStyle}"
                            VerticalAlignment="Center" />

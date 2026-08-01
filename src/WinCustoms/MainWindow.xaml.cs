@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
 
         ConfigureTitleBar();
+        ConfigureWindowIcon();
         ConfigureBackdrop();
 
         RootGrid.Loaded += OnRootLoaded;
@@ -38,6 +39,19 @@ public sealed partial class MainWindow : Window
         {
             if (args.DidSizeChange) UpdateCaptionButtonInset();
         };
+    }
+
+    /// <summary>
+    /// 작업 표시줄과 Alt+Tab 에 쓰이는 창 아이콘을 지정한다.
+    /// exe 에 박아 둔 아이콘(&lt;ApplicationIcon&gt;)은 탐색기에만 반영되고
+    /// WinUI 3 창에는 자동으로 적용되지 않는다.
+    /// </summary>
+    private void ConfigureWindowIcon()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "WinCustoms.ico");
+        if (!File.Exists(path)) return;
+
+        AppWindow.SetIcon(path);
     }
 
     /// <summary>

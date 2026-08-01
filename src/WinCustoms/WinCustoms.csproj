@@ -25,6 +25,7 @@
 
     <UseWinUI>true</UseWinUI>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\WinCustoms.ico</ApplicationIcon>
 
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -106,6 +107,17 @@
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260709004" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.18" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      제목 표시줄과 창 아이콘에 쓰는 이미지.
+      <ApplicationIcon> 은 exe 파일 자체의 아이콘만 바꾼다.
+      창 아이콘은 AppWindow.SetIcon 이 파일 경로를 요구하고, XAML Image 는 ms-appx:/// 로
+      실제 파일을 찾으므로 둘 다 앱 폴더에 복사해 둔다.
+    -->
+    <Content Include="Assets\WinCustoms.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\AppIcon.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--
