@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinCustoms.Common;
@@ -61,25 +62,22 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     private readonly ITweakCatalog _catalog;
     private readonly IAppxService _appx;
     private readonly IDialogService _dialog;
-    private readonly IShellService _shell;
     private CancellationTokenSource? _cts;
 
     public CustomIsoViewModel(
         ICustomIsoService iso,
         ITweakCatalog catalog,
         IAppxService appx,
-        IDialogService dialog,
-        IShellService shell)
+        IDialogService dialog)
     {
         _iso = iso;
         _catalog = catalog;
         _appx = appx;
         _dialog = dialog;
-        _shell = shell;
 
         SourceIsoPath = string.Empty;
         OutputIsoPath = string.Empty;
-        StatusMessage = "적법하게 보유한 순정 Windows 11 ISO가 필요합니다. 빌드에는 Windows ADK(oscdimg)가 필요합니다.";
+        StatusMessage = "적법하게 보유한 순정 Windows 11 ISO를 지정한 뒤 커스텀 ISO를 만들 수 있습니다.";
 
         var allTweaks = new List<CustomIsoSelectableTweak>();
         foreach (var tweak in _catalog.All.Where(t => t.Kind == TweakKind.Toggle))
@@ -105,7 +103,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
 
         OscdimgAvailable = _iso.FindOscdimgPath() is not null;
         if (!OscdimgAvailable)
-            StatusMessage = "oscdimg.exe 없음 — Windows ADK Deployment Tools 설치 후 다시 시도하세요.";
+            StatusMessage = "동봉된 oscdimg.exe 를 찾을 수 없습니다. 배포본이 손상됐을 수 있습니다.";
     }
 
     public string Title => "커스텀 ISO";
@@ -328,10 +326,6 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task OpenAdkHelpAsync()
-        => await _shell.OpenUrlAsync("https://learn.microsoft.com/windows-hardware/get-started/adk-install");
-
-    [RelayCommand]
     private async Task BuildAsync()
     {
         if (IsBusy) return;
@@ -339,12 +333,10 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         OscdimgAvailable = _iso.FindOscdimgPath() is not null;
         if (!OscdimgAvailable)
         {
-            StatusMessage = "oscdimg.exe 가 필요합니다.";
-            var go = await _dialog.ConfirmAsync(
-                "Windows ADK 필요",
-                "커스텀 ISO를 만들려면 Windows ADK의 Deployment Tools(oscdimg)가 필요합니다.\n\n설치 안내 페이지를 열까요?",
-                "안내 열기");
-            if (go) await OpenAdkHelpAsync();
+            StatusMessage = "oscdimg.exe 를 찾을 수 없습니다.";
+            await _dialog.ShowMessageAsync(
+                "커스텀 ISO",
+                "동봉된 Tools\\oscdimg\\oscdimg.exe 가 없습니다. 배포본을 다시 받아 주세요.");
             return;
         }
 
@@ -457,11 +449,13 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 OnPropertyChanged(nameof(ProgressText));
             }
 
-            if (!string.IsNullOrWhiteSpace(line.Message))
-            {
-                AppendLog(line.Message);
-                StatusMessage = line.Message;
-            }
+            if (string.IsNullOrWhiteSpace(line.Message))
+                return;
+
+            var msg = line.Message.TrimStart('\u200B');
+            StatusMessage = msg;
+            if (!IsStatusOnlyMessage(line.Message))
+                AppendLog(msg);
         });
 
         try
@@ -509,5 +503,24 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         OnPropertyChanged(nameof(ProgressText));
         OnPropertyChanged(nameof(HasLogLines));
         OnPropertyChanged(nameof(ShowProgressPanel));
+    }
+
+    private static bool IsStatusOnlyMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return true;
+        if (message.StartsWith('\u200B')) return true;
+
+        var msg = message.TrimStart('\u200B');
+        if (msg.Contains("경과 ", StringComparison.Ordinal)) return true;
+        if (msg.Contains("기록 중", StringComparison.Ordinal)) return true;
+        if (msg.Contains("스캔/준비", StringComparison.Ordinal)) return true;
+
+        // dism.exe 9% / 10% 같은 진행률은 상태줄만
+        if (Regex.IsMatch(msg, @"^\S+\.exe\s+\d{1,3}%\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return true;
+        if (Regex.IsMatch(msg, @"^\d{1,3}%\s*$", RegexOptions.CultureInvariant))
+            return true;
+
+        return false;
     }
 }

@@ -120,6 +120,10 @@
     -->
     <Content Include="Assets\WinCustoms.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\AppIcon.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 커스텀 ISO 생성용. ADK 설치 없이 동작하도록 동봉 (Microsoft OSCDIMG 2.56). -->
+    <Content Include="Tools\oscdimg\oscdimg.exe"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--
@@ -133,9 +137,15 @@
     <ItemGroup>
       <_CompiledXbf Include="$(OutputPath)**\*.xbf" />
       <_CompiledXbf Include="$(OutputPath)$(AssemblyName).pri" Condition="Exists('$(OutputPath)$(AssemblyName).pri')" />
+      <_BundledOscdimg Include="$(MSBuildProjectDirectory)\Tools\oscdimg\oscdimg.exe"
+                       Condition="Exists('$(MSBuildProjectDirectory)\Tools\oscdimg\oscdimg.exe')" />
 
       <ResolvedFileToPublish Include="@(_CompiledXbf)">
         <RelativePath>%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="@(_BundledOscdimg)">
+        <RelativePath>Tools\oscdimg\oscdimg.exe</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>

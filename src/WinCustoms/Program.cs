@@ -27,6 +27,13 @@ public static class Program
         if (CustomIsoJobHost.IsJobInvocation(args))
             return CustomIsoJobHost.Run(args);
 
+        // UI 는 한 프로세스만. 이미 떠 있으면 기존 창을 앞으로 가져오고 종료.
+        if (!SingleInstance.TryAcquire())
+        {
+            SingleInstance.ActivateExistingWindow();
+            return 0;
+        }
+
         // fail-fast 로 사라지기 전에 예외를 파일에 남긴다.
         CrashLog.BeginStartupCapture();
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>

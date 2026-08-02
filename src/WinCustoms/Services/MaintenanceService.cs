@@ -267,7 +267,8 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
     public Task CreateRestorePointAsync(string description, CancellationToken ct = default)
     {
         // Checkpoint-Computer 는 일부 PC 에서 VSS/WMI 대기에 걸려 끝없이 기다린다.
-        // SystemRestore.CreateRestorePoint(CIM) + 상위 프로세스 타임아웃으로 처리한다.
+        // SystemRestore.CreateRestorePoint + 상위 프로세스 타임아웃으로 처리한다.
+        // EventType/RestorePointType 은 uint32 여야 한다(Int32 해시테이블이면 0x80041005).
         var desc = description.Replace("'", "''").Replace("`", "``");
         var script = $$"""
             $ErrorActionPreference = 'Stop'
@@ -276,13 +277,23 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
               Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
             } catch { }
 
-            $r = Invoke-CimMethod -Namespace 'root/default' -ClassName 'SystemRestore' -MethodName 'CreateRestorePoint' -Arguments @{
-              Description     = $desc
-              RestorePointType = 12
-              EventType        = 100
+            $code = $null
+            try {
+              $r = Invoke-CimMethod -Namespace 'root/default' -ClassName 'SystemRestore' -MethodName 'CreateRestorePoint' -Arguments @{
+                Description      = [string]$desc
+                RestorePointType = [uint32]12
+                EventType        = [uint32]100
+              }
+              if ($null -eq $r) { throw 'CreateRestorePoint 응답이 없습니다.' }
+              $code = [int]$r.ReturnValue
+            } catch {
+              # CIM 타입 이슈/환경 차이가 있으면 구형 WMI 경로로 재시도
+              $wmi = [WMIClass]'root\default:SystemRestore'
+              $r2 = $wmi.CreateRestorePoint($desc, 12, 100)
+              if ($null -eq $r2) { throw $_.Exception.Message }
+              $code = [int]$r2.ReturnValue
             }
-            if ($null -eq $r) { throw 'CreateRestorePoint 응답이 없습니다.' }
-            $code = [int]$r.ReturnValue
+
             if ($code -ne 0) {
               throw "복원 지점 생성 실패 (코드 $code). 시스템 복원이 꺼져 있거나 VSS 서비스에 문제가 있을 수 있습니다."
             }

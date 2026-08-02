@@ -85,7 +85,7 @@ public static class CustomIsoJobHost
 
         var oscdimg = FindOscdimg()
                       ?? throw new InvalidOperationException(
-                          "oscdimg.exe 를 찾을 수 없습니다. Windows ADK 의 Deployment Tools 를 설치하세요.\n"
+                          "oscdimg.exe 를 찾을 수 없습니다. 배포본 Tools\\oscdimg\\oscdimg.exe 가 포함돼 있는지 확인하세요.\n"
                           + "https://learn.microsoft.com/windows-hardware/get-started/adk-install");
 
         var work = string.IsNullOrWhiteSpace(request.WorkDirectory)
@@ -437,19 +437,50 @@ public static class CustomIsoJobHost
         if (!File.Exists(etfsboot) || !File.Exists(efisys))
             throw new FileNotFoundException("부팅 파일(boot\\etfsboot.com 또는 efi\\microsoft\\boot\\efisys.bin)이 없습니다.");
 
-        // BIOS+UEFI 듀얼 부팅 ISO (ADK 문서의 일반적 조합)
-        var bootData = $"2#p0,e,b\"{etfsboot}\"#pEF,e,b\"{efisys}\"";
-        RunProcess(oscdimg,
-        [
-            "-m", "-o", "-u2", "-udfver102",
-            $"-bootdata:{bootData}",
-            extractDir,
-            outputIso
-        ], request);
+        // ArgumentList 는 -bootdata 안의 "경로" 따옴표를 ""경로"" 로 이스케이프해서
+        // oscdimg Error 123 을 낸다. 공백 없는 짧은 경로로 복사해 따옴표 없이 넘긴다.
+        var staging = Path.Combine(
+            Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? @"C:\",
+            "wc-oscd");
+        Directory.CreateDirectory(staging);
+        var etfsCopy = Path.Combine(staging, "etfsboot.com");
+        var efiCopy = Path.Combine(staging, "efisys.bin");
+
+        try
+        {
+            File.Copy(etfsboot, etfsCopy, overwrite: true);
+            File.Copy(efisys, efiCopy, overwrite: true);
+
+            var bootData = $"2#p0,e,b{etfsCopy}#pEF,e,b{efiCopy}";
+            RunProcess(oscdimg,
+            [
+                "-m", "-o", "-u2", "-udfver102",
+                "-bootdata:" + bootData,
+                extractDir,
+                outputIso
+            ], request);
+        }
+        finally
+        {
+            try { if (File.Exists(etfsCopy)) File.Delete(etfsCopy); } catch { /* */ }
+            try { if (File.Exists(efiCopy)) File.Delete(efiCopy); } catch { /* */ }
+        }
     }
 
     public static string? FindOscdimg()
     {
+        // 1) 앱 동봉본 (ADK 설치 불필요)
+        foreach (var bundled in new[]
+                 {
+                     Path.Combine(AppContext.BaseDirectory, "Tools", "oscdimg", "oscdimg.exe"),
+                     Path.Combine(AppContext.BaseDirectory, "oscdimg.exe"),
+                 })
+        {
+            if (File.Exists(bundled))
+                return bundled;
+        }
+
+        // 2) 시스템에 설치된 Windows ADK (있으면 사용)
         var candidates = new[]
         {
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
@@ -463,7 +494,7 @@ public static class CustomIsoJobHost
             if (File.Exists(c)) return c;
         }
 
-        // PATH
+        // 3) PATH
         var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
@@ -597,6 +628,7 @@ public static class CustomIsoJobHost
         var gate = new object();
         var lastStatus = Path.GetFileName(file) + " 실행 중…";
         var startedUtc = DateTime.UtcNow;
+        var lastReportedPercent = -1;
         Exception? readerFault = null;
 
         void HandleChunk(string chunk, StringBuilder sink)
@@ -612,10 +644,13 @@ public static class CustomIsoJobHost
                             CultureInfo.InvariantCulture, out var value))
                     {
                         var percent = (int)Math.Clamp(Math.Round(value), 0, 100);
+                        if (percent == lastReportedPercent) continue;
+                        lastReportedPercent = percent;
                         lastStatus = $"{Path.GetFileName(file)} {percent}%";
                         // 마운트 구간(35)과 다음 단계(50) 사이에 살짝 반영
                         var mapped = 35 + (int)Math.Round(percent * 0.14);
-                        Progress(request, mapped, lastStatus);
+                        // \u200B → UI 상태줄만, 로그에 % 도배 안 함
+                        Progress(request, mapped, "\u200B" + lastStatus);
                     }
                 }
 
@@ -628,6 +663,7 @@ public static class CustomIsoJobHost
                         if (line.StartsWith("버전", StringComparison.OrdinalIgnoreCase)) continue;
                         if (line.StartsWith("Version", StringComparison.OrdinalIgnoreCase)) continue;
                         if (line.StartsWith("Copyright", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (PercentRegex.IsMatch(line) && line.Length < 40) continue;
                         lastStatus = line;
                     }
                 }
@@ -679,7 +715,7 @@ public static class CustomIsoJobHost
                 : elapsed.ToString(@"mm\:ss");
             string status;
             lock (gate) status = lastStatus;
-            Progress(request, null, $"{status} · 경과 {time}");
+            Progress(request, null, $"\u200B{status} · 경과 {time}");
         }
 
         Task.WaitAll(stdoutTask, stderrTask);

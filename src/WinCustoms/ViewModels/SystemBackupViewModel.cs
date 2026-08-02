@@ -230,11 +230,15 @@ public sealed partial class SystemBackupViewModel : ObservableObject
                 OnPropertyChanged(nameof(ProgressText));
             }
 
-            if (!string.IsNullOrWhiteSpace(line.Message))
-            {
-                AppendLog(line.Message);
-                StatusMessage = line.Message;
-            }
+            if (string.IsNullOrWhiteSpace(line.Message))
+                return;
+
+            var msg = line.Message.TrimStart('\u200B');
+            StatusMessage = msg;
+
+            // 하트비트는 상태줄만. 로그에는 의미 있는 단계만 남긴다.
+            if (!IsHeartbeatMessage(line.Message))
+                AppendLog(msg);
         });
 
         try
@@ -278,4 +282,11 @@ public sealed partial class SystemBackupViewModel : ObservableObject
         OnPropertyChanged(nameof(HasLogLines));
         OnPropertyChanged(nameof(ShowProgressPanel));
     }
+
+    private static bool IsHeartbeatMessage(string message)
+        => message.StartsWith('\u200B')
+           || message.Contains("경과 ", StringComparison.Ordinal)
+           || message.Contains("스캔/준비", StringComparison.Ordinal)
+           || message.Contains("기록 중", StringComparison.Ordinal)
+           || message.Contains("파일 목록 스캔", StringComparison.Ordinal);
 }
