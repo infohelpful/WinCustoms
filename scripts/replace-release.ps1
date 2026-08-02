@@ -92,6 +92,56 @@ function Stop-ManagedProcess([System.Diagnostics.Process]$proc) {
     try { $proc.WaitForExit(10000) | Out-Null } catch { }
 }
 
+function Stop-AllWinCustoms {
+    $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $procs = @(Get-Process -Name 'WinCustoms' -ErrorAction SilentlyContinue)
+    if ($procs.Count -eq 0) { return }
+
+    Note "실행 중인 WinCustoms $($procs.Count)개 종료 (publish 폴더 잠금 해제)…"
+    foreach ($proc in $procs) {
+        Stop-ManagedProcess $proc
+    }
+
+    Start-Sleep -Seconds 1
+    $left = @(Get-Process -Name 'WinCustoms' -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        Note "남은 프로세스에 관리자 taskkill /IM 시도…"
+        try {
+            Start-Process -FilePath $taskkill -ArgumentList @('/F', '/IM', 'WinCustoms.exe') `
+                -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
+        }
+        catch { }
+        Start-Sleep -Seconds 1
+    }
+
+    $still = @(Get-Process -Name 'WinCustoms' -ErrorAction SilentlyContinue)
+    if ($still.Count -gt 0) {
+        Fail "WinCustoms 가 아직 실행 중이라 publish 폴더를 비울 수 없습니다. 작업 관리자에서 종료 후 다시 실행하세요."
+    }
+}
+
+function Clear-PublishDirectory {
+    if (-not (Test-Path $PublishDir)) { return }
+
+    Stop-AllWinCustoms
+
+    $attempt = 0
+    while ($attempt -lt 5) {
+        $attempt++
+        try {
+            Remove-Item $PublishDir -Recurse -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            Note "publish 삭제 재시도 $attempt/5 — $($_.Exception.Message)"
+            Stop-AllWinCustoms
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    Fail "publish 폴더를 비우지 못했습니다. WinCustoms/탐색기에서 해당 폴더를 닫고 다시 실행하세요.`n$PublishDir"
+}
+
 function RunQuiet([string]$exe, [string[]]$cmdArgs) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -176,7 +226,7 @@ if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') {
 # ── 2. Native AOT 게시 ────────────────────────────────────────
 Step 'Native AOT 게시 (몇 분 걸릴 수 있습니다)'
 
-if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
+Clear-PublishDirectory
 
 & dotnet publish $Project -c Release -r win-x64 -o $PublishDir --nologo
 if ($LASTEXITCODE -ne 0) { Fail '게시에 실패했습니다. 위 빌드 로그를 확인하세요.' }
