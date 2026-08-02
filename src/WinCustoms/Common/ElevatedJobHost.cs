@@ -130,9 +130,42 @@ public static class ElevatedJobHost
 
             case RegistryOperationKind.SetValue:
             {
-                using var key = root.CreateSubKey(op.SubKey, writable: true)
-                                ?? throw new InvalidOperationException("키를 만들 수 없습니다.");
-                key.SetValue(op.Name ?? string.Empty, RegistryValueCodec.Decode(op.ValueKind, op.Value), op.ValueKind);
+                var desired = RegistryValueCodec.Decode(op.ValueKind, op.Value);
+                var name = op.Name ?? string.Empty;
+
+                // 정책/ACL 로 잠긴 값은 "이미 원하는 값"이면 성공으로 본다.
+                // (예: TaskbarDa 가 GPO 로 고정돼 쓰기는 거부되지만 값은 이미 0)
+                try
+                {
+                    using var readKey = root.OpenSubKey(op.SubKey, writable: false);
+                    var current = readKey?.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    if (RegistryValueCodec.AreEqual(op.ValueKind, current, desired))
+                        return;
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    // 읽기만 막힌 경우는 아래에서 쓰기 시도
+                }
+
+                try
+                {
+                    using var key = root.CreateSubKey(op.SubKey, writable: true)
+                                    ?? throw new InvalidOperationException("키를 만들 수 없습니다.");
+                    key.SetValue(name, desired, op.ValueKind);
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    using var readKey = root.OpenSubKey(op.SubKey, writable: false);
+                    var current = readKey?.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    if (RegistryValueCodec.AreEqual(op.ValueKind, current, desired))
+                        return;
+
+                    throw new UnauthorizedAccessException(
+                        $"{ex.Message} (값이 정책/권한으로 잠겨 있고, 원하는 상태와도 다릅니다. "
+                        + "그룹 정책·회사 관리 설정을 확인하세요.)",
+                        ex);
+                }
+
                 break;
             }
 
