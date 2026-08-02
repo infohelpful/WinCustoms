@@ -35,7 +35,10 @@ public interface ISystemImageService
 
     string GetSystemVolumeRoot();
 
-    /// <summary>현재 Windows 볼륨을 WIM 으로 캡처한다. 관리자(UAC) 필요.</summary>
+    /// <summary>
+    /// WinRE 오프라인 캡처를 준비한다(플래그+부트스트랩).
+    /// 재시작 후 WinRE에서 C:를 WIM으로 캡처한다. 관리자(UAC) 필요.
+    /// </summary>
     Task<SystemImageOperationResult> CaptureAsync(
         string imageFilePath,
         string imageName,

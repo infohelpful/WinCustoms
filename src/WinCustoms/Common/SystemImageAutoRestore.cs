@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace WinCustoms.Common;
 
-/// <summary>WinRE에 자동 복원 부트스트랩을 심고 다음 부팅을 복구 환경으로 보낸다.</summary>
+/// <summary>WinRE에 자동 캡처/복원 부트스트랩을 심고 다음 부팅을 복구 환경으로 보낸다.</summary>
 public static class SystemImageAutoRestore
 {
     public static void Prepare(SystemImageJobRequest request, Action<int?, string> progress)
@@ -14,7 +14,50 @@ public static class SystemImageAutoRestore
 
         progress(5, "자동 복원 플래그 작성...");
         SystemImageCompanionFiles.WriteAutoRestoreFlag(request.ImageFile);
+        InjectAndBootToRecovery(request, progress, bootstrapLabel: "자동 복원");
+    }
 
+    /// <summary>WinRE 오프라인 캡처용 플래그 + 부트스트랩. WIM 파일은 아직 없어도 된다.</summary>
+    public static void PrepareCapture(SystemImageJobRequest request, Action<int?, string> progress)
+    {
+        if (string.IsNullOrWhiteSpace(request.ImageFile))
+            throw new InvalidOperationException("저장할 WIM 경로가 없습니다.");
+
+        var fullPath = Path.GetFullPath(request.ImageFile);
+        if (!string.Equals(Path.GetExtension(fullPath), ".wim", StringComparison.OrdinalIgnoreCase))
+            fullPath = Path.ChangeExtension(fullPath, ".wim");
+
+        var dir = Path.GetDirectoryName(fullPath)
+                  ?? throw new InvalidOperationException("저장 경로가 올바르지 않습니다.");
+        Directory.CreateDirectory(dir);
+
+        // 이전 실패 잔여 WIM 이 있으면 지워 둔다(캡처 시 덮어쓰기 전 정리).
+        try
+        {
+            if (File.Exists(fullPath))
+                File.Delete(fullPath);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("기존 WIM 을 삭제할 수 없습니다: " + ex.Message, ex);
+        }
+
+        request.ImageFile = fullPath;
+
+        var name = string.IsNullOrWhiteSpace(request.ImageName)
+            ? $"WinCustoms {DateTime.Now:yyyy-MM-dd}"
+            : request.ImageName.Trim();
+
+        progress(5, "자동 캡처 플래그 작성...");
+        SystemImageCompanionFiles.WriteAutoCaptureFlag(fullPath, name);
+        InjectAndBootToRecovery(request, progress, bootstrapLabel: "자동 캡처");
+    }
+
+    private static void InjectAndBootToRecovery(
+        SystemImageJobRequest request,
+        Action<int?, string> progress,
+        string bootstrapLabel)
+    {
         progress(15, "WinRE 위치 확인...");
         RunTool("reagentc.exe", ["/enable"], ignoreExitCode: true);
         var winreWim = FindWinReWimPath();
@@ -43,7 +86,7 @@ public static class SystemImageAutoRestore
             if (!string.IsNullOrWhiteSpace(request.CancelFile) && File.Exists(request.CancelFile))
                 throw new OperationCanceledException();
 
-            progress(55, "자동 복원 부트스트랩 주입...");
+            progress(55, $"{bootstrapLabel} 부트스트랩 주입...");
             InjectWinReBootstrap(mountDir);
 
             progress(75, "WinRE 이미지 저장 중...");

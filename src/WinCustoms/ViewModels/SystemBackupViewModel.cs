@@ -20,14 +20,14 @@ public sealed partial class SystemBackupViewModel : ObservableObject
         ImageName = $"WinCustoms {DateTime.Now:yyyy-MM-dd}";
         ImageFilePath = string.Empty;
         RestoreImagePath = string.Empty;
-        StatusMessage = "C: 백업 후 「C: 자동 복원」을 누르면, 다시 시작과 함께 복원이 자동으로 시작됩니다.";
+        StatusMessage = "「C: 백업 시작」·「C: 자동 복원」모두 다시 시작 후 WinRE에서 자동 진행됩니다.";
     }
 
     public string Title => "시스템 백업";
 
     public string Subtitle =>
-        "현재 C: Windows를 .wim 으로 복사해 둡니다. "
-        + "「C: 자동 복원」을 누르면 컴퓨터가 다시 시작된 뒤, 백업 시점으로 복원이 자동 진행됩니다.";
+        "C: Windows를 .wim 으로 백업·복원합니다. "
+        + "작업은 다시 시작 후 WinRE(복구 환경)에서 오프라인으로 진행됩니다.";
 
     public ObservableCollection<string> LogLines { get; } = [];
 
@@ -104,31 +104,44 @@ public sealed partial class SystemBackupViewModel : ObservableObject
 
         var confirmed = await _dialog.ConfirmAsync(
             "C: Windows 백업",
-            "지금 이 PC의 Windows 전체를 .wim 으로 복사합니다.\n\n"
+            "「C: 백업 시작」을 진행하면 컴퓨터가 다시 시작된 뒤, WinRE에서 C:를 .wim 으로 캡처합니다.\n\n"
             + $"저장: {ImageFilePath}\n\n"
-            + "· 수십 GB, 오래 걸릴 수 있습니다.\n"
-            + "· 관리자 권한(UAC)이 필요합니다.\n"
-            + "· 같은 PC 복구용입니다.",
+            + "· 저장 디스크(USB/외장)는 연결해 두세요.\n"
+            + "· BitLocker가 켜져 있으면 WinRE에서 잠금 해제하세요.\n"
+            + "· 캡처 중에는 전원을 끄지 마세요.\n"
+            + "· 관리자 권한(UAC)이 필요합니다.\n\n"
+            + "계속할까요?",
             "백업 시작");
 
         if (!confirmed) return;
 
         await RunOperationAsync(async (progress, ct) =>
         {
-            AppendLog($"C: 캡처 시작 → {ImageFilePath}");
+            AppendLog($"WinRE 자동 캡처 준비 중… → {ImageFilePath}");
             var result = await _images.CaptureAsync(ImageFilePath, ImageName, progress, ct);
             if (!result.Success)
-                throw new InvalidOperationException(result.Error ?? "캡처에 실패했습니다.");
+                throw new InvalidOperationException(result.Error ?? "캡처 준비에 실패했습니다.");
 
             RestoreImagePath = result.ImageFile ?? ImageFilePath;
-            AppendLog($"완료: {result.ImageFile}");
-            StatusMessage = "백업 완료. 아래에서 「C: 자동 복원」으로 되돌릴 수 있습니다.";
+            AppendLog("준비 완료. 다시 시작하면 WinRE에서 백업이 시작됩니다.");
+            StatusMessage = "곧 다시 시작합니다… USB를 뽑지 마세요.";
 
-            await _dialog.ShowMessageAsync(
-                "백업 완료",
-                $"저장됨:\n{result.ImageFile}\n\n"
-                + "복원할 때: WIM 선택 → 「C: 자동 복원」→ 다시 시작되면 자동으로 적용됩니다.\n"
-                + "USB는 꽂아 두세요.");
+            var reboot = await _dialog.ConfirmAsync(
+                "다시 시작",
+                "준비가 끝났습니다.\n\n"
+                + "지금 다시 시작하면, 부팅 직후 WinRE에서 C: 백업(WIM 캡처)이 자동으로 시작됩니다.\n"
+                + "저장 디스크는 연결된 채로 두세요.\n\n"
+                + "다시 시작할까요?",
+                "다시 시작");
+
+            if (!reboot)
+            {
+                StatusMessage = "준비만 완료됨. 나중에 고급 시작으로 다시 시작하면 자동 캡처가 실행됩니다.";
+                AppendLog(StatusMessage);
+                return;
+            }
+
+            await _images.RebootToWinREAsync(ct);
         });
     }
 
@@ -288,5 +301,7 @@ public sealed partial class SystemBackupViewModel : ObservableObject
            || message.Contains("경과 ", StringComparison.Ordinal)
            || message.Contains("스캔/준비", StringComparison.Ordinal)
            || message.Contains("기록 중", StringComparison.Ordinal)
-           || message.Contains("파일 목록 스캔", StringComparison.Ordinal);
+           || message.Contains("파일 목록 스캔", StringComparison.Ordinal)
+           || message.Contains("섀도 복사 중", StringComparison.Ordinal)
+           || message.Contains("캡처 전 검사", StringComparison.Ordinal);
 }

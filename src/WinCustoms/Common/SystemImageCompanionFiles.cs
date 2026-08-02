@@ -3,13 +3,14 @@ using System.Text;
 namespace WinCustoms.Common;
 
 /// <summary>
-/// WIM 옆 복원 스크립트 + WinRE 자동 복원 플래그/부트 스크립트.
+/// WIM 옆 복원 스크립트 + WinRE 자동 캡처/복원 플래그/부트 스크립트.
 /// </summary>
 public static class SystemImageCompanionFiles
 {
     public const string RestoreCmdFileName = "복원-C드라이브.cmd";
     public const string GuideFileName = "복원안내.txt";
     public const string AutoRestoreFlagFileName = "WinCustoms-AutoRestore.flag";
+    public const string AutoCaptureFlagFileName = "WinCustoms-AutoCapture.flag";
     public const string WinReBootstrapFileName = "WinCustomsWinREBoot.cmd";
 
     public static string GetRestoreCmdPath(string imageFile)
@@ -17,6 +18,9 @@ public static class SystemImageCompanionFiles
 
     public static string GetAutoRestoreFlagPath(string imageFile)
         => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(imageFile))!, AutoRestoreFlagFileName);
+
+    public static string GetAutoCaptureFlagPath(string imageFile)
+        => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(imageFile))!, AutoCaptureFlagFileName);
 
     public static void Write(string imageFile, string imageName)
     {
@@ -38,10 +42,12 @@ public static class SystemImageCompanionFiles
             이름: {imageName}
             만든 시각: {DateTime.Now:yyyy-MM-dd HH:mm:ss}
 
-            【추천】 WinCustoms에서 「C: 자동 복원」
+            【백업】 WinCustoms에서 「C: 백업 시작」
+            → 다시 시작 후 WinRE에서 오프라인으로 .wim 을 만듭니다.
+            → USB/외장은 연결한 채로 두세요.
+
+            【복원】 WinCustoms에서 「C: 자동 복원」
             → WinRE로 다시 시작되면 검은 화면에서 자동으로 C:에 백업을 적용합니다.
-            → 명령 프롬프트를 찾을 필요 없습니다.
-            → 백업 USB/외장이 연결된 채로 다시 시작하세요.
 
             【수동 비상】 Windows가 안 켜질 때
             1) 강제 종료 2~3회로 WinRE 진입 → 명령 프롬프트
@@ -104,50 +110,169 @@ public static class SystemImageCompanionFiles
             throw new FileNotFoundException("WIM 파일을 찾을 수 없습니다.", fullImage);
 
         Write(fullImage, Path.GetFileNameWithoutExtension(fullImage));
+        WriteVolumeFlag(fullImage, AutoRestoreFlagFileName, GetAutoRestoreFlagPath(fullImage), imageName: null);
+    }
 
+    /// <summary>WinRE에서 오프라인 캡처할 때 쓰는 플래그. WIM 파일은 아직 없어도 된다.</summary>
+    public static void WriteAutoCaptureFlag(string imageFile, string imageName)
+    {
+        var fullImage = Path.GetFullPath(imageFile);
+        if (!string.Equals(Path.GetExtension(fullImage), ".wim", StringComparison.OrdinalIgnoreCase))
+            fullImage = Path.ChangeExtension(fullImage, ".wim");
+
+        var dir = Path.GetDirectoryName(fullImage)
+                  ?? throw new InvalidOperationException("이미지 경로가 올바르지 않습니다.");
+        Directory.CreateDirectory(dir);
+
+        var name = string.IsNullOrWhiteSpace(imageName)
+            ? Path.GetFileNameWithoutExtension(fullImage)
+            : imageName.Trim();
+        // 배치/DISM 인자 깨짐 방지
+        name = name.Replace('"', '\'').Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (name.Length == 0)
+            name = "WinCustoms Backup";
+
+        Write(fullImage, name);
+        WriteVolumeFlag(fullImage, AutoCaptureFlagFileName, GetAutoCaptureFlagPath(fullImage), name);
+    }
+
+    private static void WriteVolumeFlag(string fullImage, string rootFlagName, string sideFlagPath, string? imageName)
+    {
         var root = Path.GetPathRoot(fullImage)
                    ?? throw new InvalidOperationException("이미지 드라이브 루트를 알 수 없습니다.");
         var relative = Path.GetRelativePath(root, fullImage);
         if (relative.StartsWith("..", StringComparison.Ordinal))
             throw new InvalidOperationException("WIM 경로를 드라이브 기준으로 표현할 수 없습니다.");
 
-        // 드라이브 루트 + WIM 옆 둘 다 둔다(문자가 바뀌어도 루트 플래그를 우선 탐색).
-        var content = $"""
-            WIM={relative.Replace('/', '\\')}
-            CREATED={DateTime.Now:O}
-            """;
+        var content = new StringBuilder();
+        content.Append("WIM=").Append(relative.Replace('/', '\\')).AppendLine();
+        if (!string.IsNullOrWhiteSpace(imageName))
+            content.Append("NAME=").Append(imageName).AppendLine();
+        content.Append("CREATED=").Append(DateTime.Now.ToString("O")).AppendLine();
 
-        File.WriteAllText(Path.Combine(root, AutoRestoreFlagFileName), content,
+        var text = content.ToString();
+        File.WriteAllText(Path.Combine(root, rootFlagName), text,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        File.WriteAllText(GetAutoRestoreFlagPath(fullImage), content,
+        File.WriteAllText(sideFlagPath, text,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
-    /// <summary>WinRE 이미지 안에 넣을 부트 래퍼. 플래그가 있으면 자동 복원, 없으면 기본 복구 UI.</summary>
+    /// <summary>
+    /// WinRE 이미지 안에 넣을 부트 래퍼.
+    /// AutoCapture → AutoRestore → 기본 복구 UI 순.
+    /// </summary>
     public static string BuildWinReBootstrapScript()
         => """
             @echo off
             setlocal EnableExtensions
-            title WinCustoms Auto Restore
+            title WinCustoms
             echo.
             echo ========================================
             echo   WinCustoms
             echo ========================================
             echo.
 
+            rem --- Auto CAPTURE (offline WIM) ---
+            set "CAPFLAG="
+            set "CAPDRIVE="
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\WinCustoms-AutoCapture.flag" (
+                set "CAPFLAG=%%D:\WinCustoms-AutoCapture.flag"
+                set "CAPDRIVE=%%D:"
+                goto :havecap
+              )
+            )
+            :havecap
+            if not "%CAPFLAG%"=="" goto :docapture
+
+            rem --- Auto RESTORE ---
             set "FLAGFILE="
             set "FLAGDRIVE="
             for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
               if exist "%%D:\WinCustoms-AutoRestore.flag" (
                 set "FLAGFILE=%%D:\WinCustoms-AutoRestore.flag"
                 set "FLAGDRIVE=%%D:"
-                goto :haveflag
+                goto :haverestore
               )
             )
+            :haverestore
+            if not "%FLAGFILE%"=="" goto :dorestore
 
-            :haveflag
-            if "%FLAGFILE%"=="" goto :normalui
+            goto :normalui
 
+            :docapture
+            echo Auto-capture flag found: %CAPFLAG%
+            echo.
+            set "WIMNAME="
+            set "IMGNAME=WinCustoms Backup"
+            for /f "usebackq tokens=1,* delims==" %%A in ("%CAPFLAG%") do (
+              if /i "%%A"=="WIM" set "WIMNAME=%%B"
+              if /i "%%A"=="NAME" set "IMGNAME=%%B"
+            )
+            if "%WIMNAME%"=="" (
+              echo ERROR: WIM= missing in capture flag.
+              goto :capfail
+            )
+
+            set "WIMFILE=%CAPDRIVE%\%WIMNAME%"
+            for %%I in ("%WIMFILE%") do set "WIMDIR=%%~dpI"
+            if not exist "%WIMDIR%" mkdir "%WIMDIR%" >nul 2>&1
+
+            echo Searching Windows partition...
+            set "WINVOL="
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\Windows\System32\config\SOFTWARE" if exist "%%D:\Windows\System32\ntoskrnl.exe" (
+                set "WINVOL=%%D:"
+                goto :capfoundwin
+              )
+            )
+            :capfoundwin
+            if "%WINVOL%"=="" (
+              echo ERROR: Windows partition not found.
+              goto :capfail
+            )
+
+            set "SCRATCH=%CAPDRIVE%\WinCustoms-DismScratch"
+            if not exist "%SCRATCH%" mkdir "%SCRATCH%" >nul 2>&1
+
+            echo.
+            echo Source : %WINVOL%\
+            echo Output : %WIMFILE%
+            echo Name   : %IMGNAME%
+            echo.
+            echo Capturing offline image. This takes a long time. Do not power off.
+            echo.
+
+            if exist "%WIMFILE%" del /f /q "%WIMFILE%" >nul 2>&1
+
+            dism.exe /Capture-Image /ImageFile:"%WIMFILE%" /CaptureDir:%WINVOL%\ /Name:"%IMGNAME%" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"%SCRATCH%"
+            if errorlevel 1 (
+              echo DISM capture failed.
+              goto :capfail
+            )
+
+            del /f /q "%CAPFLAG%" >nul 2>&1
+            if exist "%CAPDRIVE%\WinCustoms-AutoCapture.flag" del /f /q "%CAPDRIVE%\WinCustoms-AutoCapture.flag" >nul 2>&1
+            rem also remove side-by-side flag if present
+            for %%I in ("%WIMFILE%") do if exist "%%~dpIWinCustoms-AutoCapture.flag" del /f /q "%%~dpIWinCustoms-AutoCapture.flag" >nul 2>&1
+
+            rmdir /s /q "%SCRATCH%" >nul 2>&1
+
+            echo.
+            echo Capture finished. Rebooting in 8 seconds...
+            ping -n 9 127.0.0.1 >nul
+            wpeutil reboot
+            exit /b 0
+
+            :capfail
+            echo.
+            echo Auto-capture failed. Opening Command Prompt.
+            echo Flag left for retry: %CAPFLAG%
+            echo.
+            start "WinCustoms" %SYSTEMROOT%\System32\cmd.exe
+            exit /b 1
+
+            :dorestore
             echo Auto-restore flag found: %FLAGFILE%
             echo.
             set "WIMNAME="
@@ -160,7 +285,6 @@ public static class SystemImageCompanionFiles
             )
 
             set "WIMFILE=%FLAGDRIVE%\%WIMNAME%"
-            rem WIMNAME may include subfolders, e.g. Backups\file.wim
             if not exist "%WIMFILE%" (
               echo ERROR: WIM not found: %WIMFILE%
               echo Keep the USB/external drive plugged in.
@@ -187,10 +311,6 @@ public static class SystemImageCompanionFiles
             echo.
             echo Applying backup. This takes a long time. Do not power off.
             echo.
-
-            rem One-shot: remove flag first so a reboot won't loop forever on failure mid-way after partial apply.
-            rem Actually delete AFTER success — if we delete first and fail, user can retry by recreating flag.
-            rem Delete after success only:
 
             dism.exe /Apply-Image /ImageFile:"%WIMFILE%" /Index:1 /ApplyDir:%WINVOL%\ /CheckIntegrity
             if errorlevel 1 (
@@ -220,7 +340,7 @@ public static class SystemImageCompanionFiles
             exit /b 1
 
             :normalui
-            echo No auto-restore flag. Starting Windows Recovery...
+            echo No auto flag. Starting Windows Recovery...
             if exist "%SYSTEMROOT%\System32\Recovery\RecEnv.exe" (
               "%SYSTEMROOT%\System32\Recovery\RecEnv.exe"
               goto :afterui

@@ -4,6 +4,7 @@ namespace WinCustoms.Common;
 
 public enum SystemImageJobKind
 {
+    /// <summary>WinRE 오프라인 캡처 준비(플래그+부트스트랩). 실제 WIM 은 재부팅 후 만든다.</summary>
     Capture = 0,
     Apply = 1,
     /// <summary>WinRE에 자동 복원 부트스트랩을 심고 다음 부팅에 복구 환경으로 들어간다.</summary>
