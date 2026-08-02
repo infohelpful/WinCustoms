@@ -189,7 +189,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
             .ToList();
 
         var work = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "WinCustoms", "IsoBuild", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
 

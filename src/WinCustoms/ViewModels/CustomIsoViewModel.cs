@@ -448,6 +448,9 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 throw new InvalidOperationException(result.Error ?? "빌드 실패");
 
             AppendLog("완료: " + result.OutputIsoPath);
+            ProgressPercent = 100;
+            IsProgressIndeterminate = false;
+            OnPropertyChanged(nameof(ProgressText));
             StatusMessage = "커스텀 ISO를 만들었습니다.";
             await _dialog.ShowMessageAsync(
                 "완료",
@@ -477,9 +480,13 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         {
             if (line.Percent is int p)
             {
-                ProgressPercent = p;
-                IsProgressIndeterminate = false;
-                OnPropertyChanged(nameof(ProgressText));
+                // 프로세스 % 매핑이 이전 단계보다 작아도 막대가 뒤로 안 가게
+                if (p >= ProgressPercent || IsProgressIndeterminate)
+                {
+                    ProgressPercent = p;
+                    IsProgressIndeterminate = false;
+                    OnPropertyChanged(nameof(ProgressText));
+                }
             }
 
             if (string.IsNullOrWhiteSpace(line.Message))

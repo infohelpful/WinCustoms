@@ -88,9 +88,22 @@ public static class CustomIsoJobHost
                           "oscdimg.exe 를 찾을 수 없습니다. 배포본 Tools\\oscdimg\\oscdimg.exe 가 포함돼 있는지 확인하세요.\n"
                           + "https://learn.microsoft.com/windows-hardware/get-started/adk-install");
 
+        // 긴 DISM 작업 전에 마지막 단계(oscdimg 부팅파일 스테이징)가 되는지 먼저 확인.
+        Progress(request, 2, "ISO 포장 경로 사전 검사...");
+        PreflightOscdimgStaging();
+
         var work = string.IsNullOrWhiteSpace(request.WorkDirectory)
-            ? Path.Combine(Path.GetTempPath(), "WinCustoms", "IsoBuild-" + Guid.NewGuid().ToString("N"))
+            ? CreateNoSpaceWorkDirectory()
             : request.WorkDirectory;
+
+        // 작업 경로에 공백이 있으면 oscdimg -bootdata 외에 다른 이슈도 나기 쉬워, 가능하면 재배치.
+        if (work.Contains(' ', StringComparison.Ordinal))
+        {
+            var relocated = CreateNoSpaceWorkDirectory();
+            Progress(request, 3, "작업 폴더를 공백 없는 경로로 이동: " + relocated);
+            work = relocated;
+            request.WorkDirectory = relocated;
+        }
 
         var extractDir = Path.Combine(work, "iso");
         var mountDir = Path.Combine(work, "mount");
@@ -132,7 +145,7 @@ public static class CustomIsoJobHost
                 $"/ImageFile:{wimPath}",
                 $"/Index:{mountIndex}",
                 $"/MountDir:{mountDir}"
-            ], request);
+            ], request, mapFrom: 35, mapTo: 48);
             mounted = true;
 
             ThrowIfCancelled(request);
@@ -453,33 +466,186 @@ public static class CustomIsoJobHost
         if (!File.Exists(etfsboot) || !File.Exists(efisys))
             throw new FileNotFoundException("부팅 파일(boot\\etfsboot.com 또는 efi\\microsoft\\boot\\efisys.bin)이 없습니다.");
 
-        // ArgumentList 는 -bootdata 안의 "경로" 따옴표를 ""경로"" 로 이스케이프해서
-        // oscdimg Error 123 을 낸다. 공백 없는 짧은 경로로 복사해 따옴표 없이 넘긴다.
-        var staging = Path.Combine(
-            Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? @"C:\",
-            "wc-oscd");
-        Directory.CreateDirectory(staging);
-        var etfsCopy = Path.Combine(staging, "etfsboot.com");
-        var efiCopy = Path.Combine(staging, "efisys.bin");
+        // ArgumentList 가 -bootdata 안의 따옴표를 ""경로"" 로 넣어 oscdimg Error 123 을 낸다.
+        // 공백 없는 경로의 일반 파일로 바이트 복사해(속성 미보존) 따옴표 없이 넘긴다.
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            string? etfsCopy = null;
+            string? efiCopy = null;
+            try
+            {
+                var staging = PrepareOscdimgStagingDir(wipe: attempt > 1);
+                etfsCopy = Path.Combine(staging, $"etfs-{Environment.ProcessId}-{attempt}.com");
+                efiCopy = Path.Combine(staging, $"efi-{Environment.ProcessId}-{attempt}.bin");
 
+                ClearReadOnlyAttribute(etfsboot);
+                ClearReadOnlyAttribute(efisys);
+                CopyFileRaw(etfsboot, etfsCopy);
+                CopyFileRaw(efisys, efiCopy);
+
+                if (!File.Exists(etfsCopy) || !File.Exists(efiCopy))
+                    throw new IOException("부팅 파일 스테이징에 실패했습니다.");
+
+                // 쓰기 가능한지 한 번 더 확인
+                using (var fs = new FileStream(etfsCopy, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                {
+                    _ = fs.Length;
+                }
+
+                var bootData = $"2#p0,e,b{etfsCopy}#pEF,e,b{efiCopy}";
+                RunProcess(oscdimg,
+                [
+                    "-m", "-o", "-u2", "-udfver102",
+                    "-bootdata:" + bootData,
+                    extractDir,
+                    outputIso
+                ], request, mapFrom: 90, mapTo: 99);
+                return;
+            }
+            catch (Exception ex) when (attempt < 2 && IsStagingAccessError(ex))
+            {
+                lastError = ex;
+                Progress(request, null, "ISO 포장 스테이징 재시도: " + ex.Message);
+            }
+            finally
+            {
+                ForceDeleteFile(etfsCopy);
+                ForceDeleteFile(efiCopy);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "ISO 포장(oscdimg) 부팅 파일 준비에 실패했습니다.\n"
+            + (lastError?.Message ?? "Access denied")
+            + "\n\n백신/Controlled Folder Access 가 C:\\ProgramData\\WinCustoms 를 막는지 확인하세요.",
+            lastError);
+    }
+
+    private static bool IsStagingAccessError(Exception ex) =>
+        ex is UnauthorizedAccessException
+        || ex is IOException
+        || (ex.InnerException is UnauthorizedAccessException)
+        || ex.Message.Contains("denied", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("거부", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>C:\ProgramData\WinCustoms\… — 공백 없고 관리자 쓰기에 안정적.</summary>
+    private static string GetWinCustomsDataRoot() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "WinCustoms");
+
+    private static string CreateNoSpaceWorkDirectory()
+    {
+        var dir = Path.Combine(GetWinCustomsDataRoot(), "IsoBuild", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static string PrepareOscdimgStagingDir(bool wipe = false)
+    {
+        var staging = Path.Combine(GetWinCustomsDataRoot(), "oscd");
+        Directory.CreateDirectory(staging);
+
+        // 예전 C:\wc-oscd 잔여(읽기 전용) 정리
+        TryWipeDirectory(Path.Combine(
+            Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\",
+            "wc-oscd"));
+
+        if (wipe)
+            TryWipeDirectoryContents(staging);
+        else
+        {
+            // 오래된 스테이징 파일의 읽기 전용만 해제·삭제 시도
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(staging))
+                    ForceDeleteFile(f);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return staging;
+    }
+
+    private static void PreflightOscdimgStaging()
+    {
+        var staging = PrepareOscdimgStagingDir();
+        var probe = Path.Combine(staging, "probe-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            File.Copy(etfsboot, etfsCopy, overwrite: true);
-            File.Copy(efisys, efiCopy, overwrite: true);
-
-            var bootData = $"2#p0,e,b{etfsCopy}#pEF,e,b{efiCopy}";
-            RunProcess(oscdimg,
-            [
-                "-m", "-o", "-u2", "-udfver102",
-                "-bootdata:" + bootData,
-                extractDir,
-                outputIso
-            ], request);
+            CopyFileRaw(
+                // 아무 작은 기존 파일이 없어도 직접 기록
+                source: null,
+                destination: probe,
+                rawBytes: [0x57, 0x43]); // "WC"
+            using var fs = new FileStream(probe, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            if (fs.Length < 2)
+                throw new IOException("스테이징 probe 기록 실패");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "ISO 포장용 임시 폴더에 쓸 수 없습니다: " + staging + "\n"
+                + ex.Message
+                + "\n긴 작업 시작 전에 막힌 것이니, 백신 예외 목록에 위 폴더를 넣어 주세요.",
+                ex);
         }
         finally
         {
-            try { if (File.Exists(etfsCopy)) File.Delete(etfsCopy); } catch { /* */ }
-            try { if (File.Exists(efiCopy)) File.Delete(efiCopy); } catch { /* */ }
+            ForceDeleteFile(probe);
+        }
+    }
+
+    private static void CopyFileRaw(string? source, string destination, byte[]? rawBytes = null)
+    {
+        ForceDeleteFile(destination);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+
+        if (rawBytes is not null)
+        {
+            File.WriteAllBytes(destination, rawBytes);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
+            throw new FileNotFoundException("복사할 파일이 없습니다.", source);
+
+        // File.Copy 는 읽기 전용 속성을 그대로 넘겨, 다음 덮어쓰기에서 Access Denied 를 만든다.
+        using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            input.CopyTo(output);
+        }
+
+        ClearReadOnlyAttribute(destination);
+    }
+
+    private static void TryWipeDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+        TryWipeDirectoryContents(path);
+        try { Directory.Delete(path, recursive: false); } catch { /* */ }
+    }
+
+    private static void TryWipeDirectoryContents(string path)
+    {
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(path))
+                ForceDeleteFile(f);
+            foreach (var d in Directory.EnumerateDirectories(path))
+            {
+                TryWipeDirectoryContents(d);
+                try { Directory.Delete(d, recursive: true); } catch { /* */ }
+            }
+        }
+        catch
+        {
+            // ignore
         }
     }
 
@@ -613,10 +779,15 @@ public static class CustomIsoJobHost
         @"(\d{1,3}(?:\.\d+)?)\s*%",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static void RunDism(IReadOnlyList<string> args, CustomIsoJobRequest request, bool ignoreExit = false)
+    private static void RunDism(
+        IReadOnlyList<string> args,
+        CustomIsoJobRequest request,
+        bool ignoreExit = false,
+        int? mapFrom = null,
+        int? mapTo = null)
     {
         ThrowIfCancelled(request);
-        RunProcess(ResolveDism(), args, request, ignoreExit);
+        RunProcess(ResolveDism(), args, request, ignoreExit, mapFrom, mapTo);
     }
 
     private static string ResolveDism()
@@ -625,7 +796,13 @@ public static class CustomIsoJobHost
         return File.Exists(p) ? p : "dism.exe";
     }
 
-    private static void RunProcess(string file, IReadOnlyList<string> args, CustomIsoJobRequest request, bool ignoreExit = false)
+    private static void RunProcess(
+        string file,
+        IReadOnlyList<string> args,
+        CustomIsoJobRequest request,
+        bool ignoreExit = false,
+        int? mapFrom = null,
+        int? mapTo = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -663,9 +840,13 @@ public static class CustomIsoJobHost
                         if (percent == lastReportedPercent) continue;
                         lastReportedPercent = percent;
                         lastStatus = $"{Path.GetFileName(file)} {percent}%";
-                        // 마운트 구간(35)과 다음 단계(50) 사이에 살짝 반영
-                        var mapped = 35 + (int)Math.Round(percent * 0.14);
-                        // \u200B → UI 상태줄만, 로그에 % 도배 안 함
+
+                        // mapFrom/mapTo 가 있을 때만 전체 진행률에 반영.
+                        // (예전엔 전부 35~49 로 눌러서 oscdimg 100% 가 UI 49% 로 남았음)
+                        int? mapped = null;
+                        if (mapFrom is int from && mapTo is int to && to >= from)
+                            mapped = from + (int)Math.Round(percent / 100.0 * (to - from));
+
                         Progress(request, mapped, "\u200B" + lastStatus);
                     }
                 }
@@ -837,9 +1018,22 @@ public static class CustomIsoJobHost
         }
     }
 
+    private static void ForceDeleteFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        try
+        {
+            ClearReadOnlyAttribute(path);
+            File.Delete(path);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private static void TryDelete(string path)
     {
-        try { if (File.Exists(path)) File.Delete(path); }
-        catch { /* */ }
+        ForceDeleteFile(path);
     }
 }
