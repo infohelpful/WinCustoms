@@ -15,12 +15,9 @@ public interface IElevationService
 }
 
 /// <summary>
-/// 관리자 권한이 필요한 작업을 "자기 자신을 runas 로 재실행" 방식으로 처리한다.
-///
-/// 앱 전체를 관리자로 띄우지 않는 이유
-///  - 관리자 프로세스에서 HKCU 를 쓰면 (계정에 따라) 다른 사용자 하이브에 기록될 수 있다.
-///  - 탐색기 드래그 앤 드롭 등 셸 연동이 UIPI 로 막힌다.
-/// 그래서 UI 는 asInvoker 로 두고, HKLM 작업만 짧게 승격시킨다.
+/// 관리자 권한이 필요한 작업을 실행한다.
+/// 앱은 requireAdministrator 로 기동하므로 보통 인프로세스 처리되고,
+/// 비승격 상태(구버전/직접 우회)일 때만 runas 로 재실행한다.
 /// </summary>
 public sealed class ElevationService : IElevationService
 {

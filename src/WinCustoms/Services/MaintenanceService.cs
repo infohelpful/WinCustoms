@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Win32;
 using WinCustoms.Common;
@@ -37,45 +38,111 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
 
     public bool IsUltimatePerformanceActive()
     {
-        var active = _registry.ReadString(
-            RegistryRoot.LocalMachine, RegistryPaths.PowerSchemesKey, "ActivePowerScheme");
-
-        return string.Equals(active, RegistryPaths.UltimatePerformanceGuid, StringComparison.OrdinalIgnoreCase);
+        // duplicatescheme 로 만든 플랜은 템플릿 GUID(e9a42b02-…)와 다르다.
+        // 활성 구성표 이름에 "최고의 성능" / Ultimate 이 있는지로 판별한다.
+        try
+        {
+            var output = RunPowerCfgCapture(["/getactivescheme"]);
+            return LooksLikeUltimatePerformance(output);
+        }
+        catch
+        {
+            var active = _registry.ReadString(
+                RegistryRoot.LocalMachine, RegistryPaths.PowerSchemesKey, "ActivePowerScheme");
+            return string.Equals(active, RegistryPaths.UltimatePerformanceGuid, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     public Task EnableUltimatePerformanceAsync(CancellationToken ct = default)
     {
-        var job = new ElevatedJob
-        {
-            Commands =
-            {
-                // 이미 만들어져 있으면 오류를 반환하므로 종료 코드를 무시한다.
-                new CommandOperation
-                {
-                    FileName = "powercfg.exe",
-                    Arguments = ["-duplicatescheme", RegistryPaths.UltimatePerformanceGuid],
-                    IgnoreExitCode = true
-                },
-                CommandOperation.Create("powercfg.exe", "-setactive", RegistryPaths.UltimatePerformanceGuid)
+        // -duplicatescheme 은 새 GUID 를 만들고, 템플릿 GUID 로는 -setactive 할 수 없다.
+        var template = RegistryPaths.UltimatePerformanceGuid;
+        var script = $$"""
+            $ErrorActionPreference = 'Stop'
+            $template = '{{template}}'
+            $raw = & powercfg.exe -duplicatescheme $template 2>&1 | Out-String
+            $guid = $null
+            $m = [regex]::Match($raw, '[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}')
+            if ($m.Success -and $m.Value -ne $template) { $guid = $m.Value }
+            if (-not $guid) {
+              $list = & powercfg.exe /L | Out-String
+              foreach ($line in ($list -split "`r?`n")) {
+                if ($line -notmatch 'Ultimate Performance|최고의 성능|최고 성능') { continue }
+                $gm = [regex]::Match($line, '[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}')
+                if ($gm.Success -and $gm.Value -ne $template) { $guid = $gm.Value; break }
+              }
             }
-        };
+            if (-not $guid) { throw "최고의 성능 전원 플랜을 만들거나 찾지 못했습니다.`n$raw" }
+            & powercfg.exe -setactive $guid
+            if ($LASTEXITCODE -ne 0) { throw "powercfg -setactive 실패 (코드 $LASTEXITCODE)" }
+            """;
 
-        return RunJobAsync(job, ct);
+        return RunElevatedPowerShellAsync(script, ct);
     }
 
     public Task DisableUltimatePerformanceAsync(CancellationToken ct = default)
     {
+        var balanced = RegistryPaths.BalancedGuid;
+        var template = RegistryPaths.UltimatePerformanceGuid;
+        var script = $$"""
+            $ErrorActionPreference = 'Continue'
+            $balanced = '{{balanced}}'
+            $template = '{{template}}'
+            & powercfg.exe -setactive $balanced
+            if ($LASTEXITCODE -ne 0) { throw "균형 조정 전원 플랜으로 전환하지 못했습니다 (코드 $LASTEXITCODE)" }
+            $list = & powercfg.exe /L | Out-String
+            foreach ($line in ($list -split "`r?`n")) {
+              if ($line -notmatch 'Ultimate Performance|최고의 성능|최고 성능') { continue }
+              $gm = [regex]::Match($line, '[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}')
+              if (-not $gm.Success) { continue }
+              $g = $gm.Value
+              if ($g -eq $template -or $g -eq $balanced) { continue }
+              & powercfg.exe -delete $g | Out-Null
+            }
+            """;
+
+        return RunElevatedPowerShellAsync(script, ct);
+    }
+
+    private static bool LooksLikeUltimatePerformance(string text)
+        => text.Contains("Ultimate Performance", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("최고의 성능", StringComparison.Ordinal)
+           || text.Contains("최고 성능", StringComparison.Ordinal);
+
+    private static string RunPowerCfgCapture(IReadOnlyList<string> args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powercfg.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = ConsoleEncoding.OemOrAnsi,
+            StandardErrorEncoding = ConsoleEncoding.OemOrAnsi
+        };
+        foreach (var a in args)
+            psi.ArgumentList.Add(a);
+
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("powercfg 실행 실패");
+        var stdout = p.StandardOutput.ReadToEnd();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit(30_000);
+        return string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
+    }
+
+    private Task RunElevatedPowerShellAsync(string script, CancellationToken ct)
+    {
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var powershell = Path.Combine(system32, "WindowsPowerShell", "v1.0", "powershell.exe");
+
         var job = new ElevatedJob
         {
             Commands =
             {
-                CommandOperation.Create("powercfg.exe", "-setactive", RegistryPaths.BalancedGuid),
-                new CommandOperation
-                {
-                    FileName = "powercfg.exe",
-                    Arguments = ["-delete", RegistryPaths.UltimatePerformanceGuid],
-                    IgnoreExitCode = true
-                }
+                CommandOperation.Create(powershell,
+                    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
             }
         };
 
@@ -199,11 +266,26 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
 
     public Task CreateRestorePointAsync(string description, CancellationToken ct = default)
     {
-        var script = $"""
+        // Checkpoint-Computer 는 일부 PC 에서 VSS/WMI 대기에 걸려 끝없이 기다린다.
+        // SystemRestore.CreateRestorePoint(CIM) + 상위 프로세스 타임아웃으로 처리한다.
+        var desc = description.Replace("'", "''").Replace("`", "``");
+        var script = $$"""
             $ErrorActionPreference = 'Stop'
-            $drive = "$env:SystemDrive\"
-            Enable-ComputerRestore -Drive $drive
-            Checkpoint-Computer -Description '{description.Replace("'", "''")}' -RestorePointType 'MODIFY_SETTINGS'
+            $desc = '{{desc}}'
+            try {
+              Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
+            } catch { }
+
+            $r = Invoke-CimMethod -Namespace 'root/default' -ClassName 'SystemRestore' -MethodName 'CreateRestorePoint' -Arguments @{
+              Description     = $desc
+              RestorePointType = 12
+              EventType        = 100
+            }
+            if ($null -eq $r) { throw 'CreateRestorePoint 응답이 없습니다.' }
+            $code = [int]$r.ReturnValue
+            if ($code -ne 0) {
+              throw "복원 지점 생성 실패 (코드 $code). 시스템 복원이 꺼져 있거나 VSS 서비스에 문제가 있을 수 있습니다."
+            }
             """;
 
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));

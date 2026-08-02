@@ -15,6 +15,9 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // DISM/powercfg 등 OEM(CP949) 콘솔 출력을 디코딩하려면 코드 페이지 제공자가 필요하다.
+        ConsoleEncoding.EnsureRegistered();
+
         if (ElevatedJobHost.IsJobInvocation(args))
             return ElevatedJobHost.Run(args);
 

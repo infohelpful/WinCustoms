@@ -38,64 +38,64 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         if (!File.Exists(isoPath))
             throw new FileNotFoundException("ISO 파일을 찾을 수 없습니다.", isoPath);
 
-        // 관리자 없이 ISO 마운트가 막히는 환경이 있어, 승격 PowerShell로 임시 마운트 후 Get-ImageInfo
+        // DISM /Get-ImageInfo 는 관리자 권한이 필요하다(비승격 시 740).
+        // install.wim 전체를 복사하지 않고, ISO를 잠깐 마운트한 뒤 그 경로로 조회한다.
         var work = Path.Combine(Path.GetTempPath(), "WinCustoms", "iso-probe-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
+        var infoFile = Path.Combine(work, "imageinfo.txt");
 
         try
         {
+            var isoEsc = isoPath.Replace("'", "''");
+            var outEsc = infoFile.Replace("'", "''");
             var script = $$"""
                 $ErrorActionPreference = 'Stop'
-                $iso = '{{isoPath.Replace("'", "''")}}'
-                $work = '{{work.Replace("'", "''")}}'
+                $iso = '{{isoEsc}}'
+                $out = '{{outEsc}}'
+                if (-not (Test-Path -LiteralPath $iso)) { throw "ISO 없음: $iso" }
+
                 $img = Mount-DiskImage -ImagePath $iso -PassThru
                 try {
-                  $letter = ($img | Get-Volume).DriveLetter
-                  $wim = Join-Path ($letter.ToString() + ':\sources') 'install.wim'
-                  $esd = Join-Path ($letter.ToString() + ':\sources') 'install.esd'
-                  $target = if (Test-Path $wim) { $wim } elseif (Test-Path $esd) { $esd } else { throw 'install.wim/esd 없음' }
-                  Copy-Item -LiteralPath $target -Destination (Join-Path $work 'probe.img') -Force
-                  Write-Output (Join-Path $work 'probe.img')
+                  Start-Sleep -Milliseconds 400
+                  $vol = Get-DiskImage -ImagePath $iso | Get-Volume
+                  if ($null -eq $vol) { throw 'ISO 볼륨을 찾지 못했습니다.' }
+                  $letter = [string]$vol.DriveLetter
+                  if ([string]::IsNullOrWhiteSpace($letter)) { throw 'ISO 드라이브 문자가 없습니다. 다른 프로그램이 ISO를 사용 중일 수 있습니다.' }
+
+                  $root = $letter + ':\'
+                  $wim = Join-Path $root 'sources\install.wim'
+                  $esd = Join-Path $root 'sources\install.esd'
+                  if (Test-Path -LiteralPath $wim) { $target = $wim }
+                  elseif (Test-Path -LiteralPath $esd) { $target = $esd }
+                  else { throw 'sources\install.wim / install.esd 를 찾을 수 없습니다. 순정 Windows ISO인지 확인하세요.' }
+
+                  $dism = Join-Path $env:SystemRoot 'System32\dism.exe'
+                  $raw = & $dism /Get-ImageInfo "/ImageFile:$target" 2>&1 | Out-String
+                  if ($LASTEXITCODE -ne 0) {
+                    throw ("DISM 종료 코드 {0}. {1}" -f $LASTEXITCODE, $raw.Trim())
+                  }
+                  Set-Content -LiteralPath $out -Value $raw -Encoding UTF8
                 }
                 finally {
-                  Dismount-DiskImage -ImagePath $iso | Out-Null
+                  Dismount-DiskImage -ImagePath $iso -ErrorAction SilentlyContinue | Out-Null
                 }
                 """;
 
-            // 비승격에서도 Mount-DiskImage 가 되는 경우가 많음
-            var psi = new ProcessStartInfo
+            await RunElevatedPowerShellAsync(script, ct).ConfigureAwait(false);
+
+            if (!File.Exists(infoFile))
+                throw new InvalidOperationException("DISM 이미지 정보 파일이 만들어지지 않았습니다.");
+
+            var text = await File.ReadAllTextAsync(infoFile, ct).ConfigureAwait(false);
+            var list = CustomIsoJobHost.ParseImageInfo(text);
+            if (list.Count == 0)
             {
-                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
-                    "WindowsPowerShell", "v1.0", "powershell.exe"),
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            if (!File.Exists(psi.FileName)) psi.FileName = "powershell.exe";
+                var preview = text.Length <= 600 ? text.Trim() : text.Trim()[..600] + "…";
+                throw new InvalidOperationException(
+                    "에디션 목록을 해석하지 못했습니다. DISM 출력:\n" + preview);
+            }
 
-            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
-            psi.ArgumentList.Add("-NoProfile");
-            psi.ArgumentList.Add("-NonInteractive");
-            psi.ArgumentList.Add("-ExecutionPolicy");
-            psi.ArgumentList.Add("Bypass");
-            psi.ArgumentList.Add("-EncodedCommand");
-            psi.ArgumentList.Add(encoded);
-
-            using var p = Process.Start(psi) ?? throw new InvalidOperationException("PowerShell 실행 실패");
-            var stdout = await p.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
-            var stderr = await p.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
-            await p.WaitForExitAsync(ct).ConfigureAwait(false);
-
-            if (p.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
-
-            var probe = stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .LastOrDefault();
-            if (string.IsNullOrWhiteSpace(probe) || !File.Exists(probe))
-                throw new InvalidOperationException("설치 이미지를 ISO에서 읽지 못했습니다.");
-
-            return CustomIsoJobHost.GetImageInfos(probe);
+            return list;
         }
         finally
         {
@@ -109,6 +109,61 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
                 // ignore
             }
         }
+    }
+
+    private async Task RunElevatedPowerShellAsync(string script, CancellationToken ct)
+    {
+        var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var powershell = Path.Combine(system32, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershell)) powershell = "powershell.exe";
+
+        if (_elevation.IsElevated)
+        {
+            await RunPowerShellLocalAsync(powershell, encoded, ct).ConfigureAwait(false);
+            return;
+        }
+
+        var job = new ElevatedJob
+        {
+            Commands =
+            {
+                CommandOperation.Create(powershell,
+                    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
+            }
+        };
+
+        var result = await _elevation.RunAsync(job, ct).ConfigureAwait(false);
+        if (!result.Success)
+            throw new InvalidOperationException(string.Join(Environment.NewLine, result.Errors));
+    }
+
+    private static async Task RunPowerShellLocalAsync(string powershell, string encoded, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = powershell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        ConsoleEncoding.ApplyTo(psi);
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-EncodedCommand");
+        psi.ArgumentList.Add(encoded);
+
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("PowerShell 실행 실패");
+        var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = p.StandardError.ReadToEndAsync(ct);
+        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
     }
 
     public async Task<CustomIsoBuildResult> BuildAsync(

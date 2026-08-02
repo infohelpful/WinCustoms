@@ -88,6 +88,7 @@ public sealed class ShellService : IShellService
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);

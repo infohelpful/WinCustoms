@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage.Pickers;
 using WinCustoms.Common;
 
 namespace WinCustoms.Services;
@@ -98,98 +97,71 @@ public sealed class DialogService : IDialogService
         }
     }
 
-    public async Task<string?> PickExecutableAsync()
+    public Task<string?> PickExecutableAsync()
+        => PickOpenAsync(
+            "실행 파일 선택",
+            "실행 파일",
+            "*.exe;*.bat;*.cmd;*.lnk",
+            "exe");
+
+    public Task<string?> PickFolderAsync()
+        => RunNativeAsync(() => NativeFileDialog.PickFolder(App.WindowHandle, "폴더 선택"));
+
+    public Task<string?> PickWimFileAsync()
+        => PickOpenAsync("WIM 파일 선택", "Windows 이미지 (*.wim)", "*.wim", "wim");
+
+    public Task<string?> PickSaveWimAsync(string suggestedFileName)
+        => PickSaveAsync(
+            "WIM 저장",
+            "Windows 이미지 (*.wim)",
+            "*.wim",
+            string.IsNullOrWhiteSpace(suggestedFileName)
+                ? $"WinCustoms-Backup-{DateTime.Now:yyyyMMdd}.wim"
+                : EnsureExtension(suggestedFileName, ".wim"),
+            "wim");
+
+    public Task<string?> PickIsoFileAsync()
+        => PickOpenAsync("순정 Windows ISO 선택", "디스크 이미지 (*.iso)", "*.iso", "iso");
+
+    public Task<string?> PickSaveIsoAsync(string suggestedFileName)
+        => PickSaveAsync(
+            "커스텀 ISO 저장",
+            "디스크 이미지 (*.iso)",
+            "*.iso",
+            string.IsNullOrWhiteSpace(suggestedFileName)
+                ? $"WinCustoms-Win11-{DateTime.Now:yyyyMMdd}.iso"
+                : EnsureExtension(suggestedFileName, ".iso"),
+            "iso");
+
+    private Task<string?> PickOpenAsync(string title, string filterDescription, string filterPattern, string defaultExt)
+        => RunNativeAsync(() =>
+            NativeFileDialog.OpenFile(App.WindowHandle, title, filterDescription, filterPattern, defaultExt));
+
+    private Task<string?> PickSaveAsync(
+        string title, string filterDescription, string filterPattern, string suggestedFileName, string defaultExt)
+        => RunNativeAsync(() =>
+            NativeFileDialog.SaveFile(
+                App.WindowHandle, title, filterDescription, filterPattern, suggestedFileName, defaultExt));
+
+    private async Task<string?> RunNativeAsync(Func<string?> show)
     {
-        var picker = new FileOpenPicker
+        try
         {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            ViewMode = PickerViewMode.List
-        };
-
-        picker.FileTypeFilter.Add(".exe");
-        picker.FileTypeFilter.Add(".bat");
-        picker.FileTypeFilter.Add(".cmd");
-        picker.FileTypeFilter.Add(".lnk");
-
-        // 언패키지 앱에서는 피커에 소유자 창 핸들을 직접 지정해야 한다.
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
-        return file?.Path;
+            return await UiThread.InvokeAsync(() => Task.FromResult(show())).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("file-dialog", ex);
+            await ShowMessageAsync("파일 선택 실패", ex.Message).ConfigureAwait(true);
+            return null;
+        }
     }
 
-    public async Task<string?> PickFolderAsync()
+    private static string EnsureExtension(string fileName, string extension)
     {
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            ViewMode = PickerViewMode.List
-        };
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var folder = await picker.PickSingleFolderAsync();
-        return folder?.Path;
-    }
-
-    public async Task<string?> PickWimFileAsync()
-    {
-        var picker = new FileOpenPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            ViewMode = PickerViewMode.List
-        };
-        picker.FileTypeFilter.Add(".wim");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
-        return file?.Path;
-    }
-
-    public async Task<string?> PickSaveWimAsync(string suggestedFileName)
-    {
-        var picker = new FileSavePicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            SuggestedFileName = string.IsNullOrWhiteSpace(suggestedFileName)
-                ? $"WinCustoms-Backup-{DateTime.Now:yyyyMMdd}"
-                : suggestedFileName
-        };
-        picker.FileTypeChoices.Add("Windows 이미지 (*.wim)", [".wim"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var file = await picker.PickSaveFileAsync();
-        return file?.Path;
-    }
-
-    public async Task<string?> PickIsoFileAsync()
-    {
-        var picker = new FileOpenPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            ViewMode = PickerViewMode.List
-        };
-        picker.FileTypeFilter.Add(".iso");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var file = await picker.PickSingleFileAsync();
-        return file?.Path;
-    }
-
-    public async Task<string?> PickSaveIsoAsync(string suggestedFileName)
-    {
-        var picker = new FileSavePicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            SuggestedFileName = string.IsNullOrWhiteSpace(suggestedFileName)
-                ? $"WinCustoms-Win11-{DateTime.Now:yyyyMMdd}"
-                : suggestedFileName
-        };
-        picker.FileTypeChoices.Add("디스크 이미지 (*.iso)", [".iso"]);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
-
-        var file = await picker.PickSaveFileAsync();
-        return file?.Path;
+        if (fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            return fileName;
+        return fileName + extension;
     }
 
     public async Task<T?> PickOptionAsync<T>(

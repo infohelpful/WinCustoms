@@ -41,7 +41,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string ElevationText => _elevation.IsElevated
         ? "관리자 권한으로 실행 중"
-        : "표준 권한 · 필요할 때만 승격";
+        : "관리자 권한 필요 · 다시 실행하세요";
 
     public string AppVersion => "1.0.0";
 
@@ -76,7 +76,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         var confirmed = await _dialog.ConfirmAsync(
             "시스템 복원 지점 만들기",
-            "현재 시스템 상태를 복원 지점으로 저장합니다. 관리자 권한 승인이 필요하며 1~2분 정도 걸릴 수 있습니다.",
+            "현재 시스템 상태를 복원 지점으로 저장합니다. 관리자 권한 승인이 필요하며 보통 수십 초 걸립니다.",
             "만들기");
 
         if (!confirmed) return;

@@ -160,10 +160,11 @@ public static class ElevatedJobHost
                     if (RegistryValueCodec.AreEqual(op.ValueKind, current, desired))
                         return;
 
-                    throw new UnauthorizedAccessException(
-                        $"{ex.Message} (값이 정책/권한으로 잠겨 있고, 원하는 상태와도 다릅니다. "
-                        + "그룹 정책·회사 관리 설정을 확인하세요.)",
-                        ex);
+                    // 정책으로 값 생성/변경 자체가 막힌 경우(예: TaskbarDa).
+                    // 같은 트윅의 다른 값은 계속 적용되도록 여기서 실패로 끝내지 않는다.
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[WinCustoms] 레지스트리 쓰기 건너뜀(잠김): {op.Root}\\{op.SubKey} [{name}] — {ex.Message}");
+                    return;
                 }
 
                 break;
@@ -202,6 +203,7 @@ public static class ElevatedJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
 
         foreach (var a in cmd.Arguments)
             psi.ArgumentList.Add(a);
@@ -209,9 +211,29 @@ public static class ElevatedJobHost
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException("프로세스를 시작할 수 없습니다.");
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit(120_000);
+        // ReadToEnd 를 먼저 호출하면 자식이 종료될 때까지 영원히 막혀
+        // WaitForExit(timeout) 이 의미가 없어진다. 병렬로 읽고 타임아웃 시 강제 종료.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        const int timeoutMs = 90_000;
+        if (!process.WaitForExit(timeoutMs))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // ignore
+            }
+
+            throw new TimeoutException(
+                $"{Path.GetFileName(cmd.FileName)} 이(가) {timeoutMs / 1000}초 안에 끝나지 않아 중단했습니다.");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
 
         if (!cmd.IgnoreExitCode && process.ExitCode != 0)
         {

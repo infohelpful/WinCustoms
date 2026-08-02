@@ -50,7 +50,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public string ElevationText => _elevation.IsElevated
         ? "관리자 권한으로 실행 중입니다."
-        : "표준 권한으로 실행 중입니다. HKLM 을 수정하는 트윅에서만 UAC 승인을 요청합니다.";
+        : "관리자 권한이 없습니다. 앱을 다시 실행해 UAC를 허용하세요.";
 
     public string AppliedSummary
     {

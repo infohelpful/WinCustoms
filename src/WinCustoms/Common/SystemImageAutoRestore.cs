@@ -203,6 +203,7 @@ public static class SystemImageAutoRestore
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         foreach (var a in args)
             psi.ArgumentList.Add(a);
 

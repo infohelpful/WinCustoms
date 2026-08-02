@@ -42,13 +42,14 @@ public sealed partial class TweakCatalog
         _factory.FromRegistry(
             id: "taskbar.hide-system-icons",
             title: "위젯 · 검색 · 작업 보기 · 채팅 · Copilot 아이콘 숨기기",
-            description: "위젯·검색·작업보기·채팅·Copilot이 켜져 있으면 자리를 차지하고 알림·트래픽이 늘어납니다. 끄면 표시줄이 단순해집니다.",
+            description: "검색·작업보기·채팅·Copilot 아이콘을 숨깁니다. "
+                         + "위젯(TaskbarDa)은 일부 PC에서 정책으로 잠겨 있어, "
+                         + "이미 숨겨져 있거나 잠긴 경우 건너뜁니다.",
             category: TweakCategory.Taskbar,
             specs:
             [
-                RegistryValueSpec.Dword(
-                    RegistryRoot.CurrentUser, RegistryPaths.ExplorerAdvanced,
-                    "TaskbarDa", applied: 0, defaultValue: 1),
+                // TaskbarDa(위젯)는 일부 환경에서 생성/변경이 정책으로 차단된다.
+                // 잠긴 PC에서 전체 트윅이 실패하지 않도록 스펙에서 제외한다.
 
                 RegistryValueSpec.Dword(
                     RegistryRoot.CurrentUser, RegistryPaths.ExplorerAdvanced,

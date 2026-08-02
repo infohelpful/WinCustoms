@@ -264,7 +264,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         }
 
         IsBusy = true;
-        StatusMessage = "ISO에서 에디션 목록을 읽는 중...";
+        StatusMessage = "ISO에서 에디션 목록을 읽는 중… (관리자 권한 필요)";
         Editions.Clear();
         SelectedEdition = null;
         OnPropertyChanged(nameof(ShowProgressPanel));
@@ -282,6 +282,12 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             StatusMessage = Editions.Count == 0
                 ? "에디션을 찾지 못했습니다."
                 : $"에디션 {Editions.Count}개 확인됨.";
+        }
+        catch (ElevationDeniedException)
+        {
+            StatusMessage = "관리자 권한이 거부되어 에디션을 읽지 못했습니다.";
+            await _dialog.ShowMessageAsync("권한 필요",
+                "에디션 목록을 읽으려면 관리자 권한(UAC) 승인이 필요합니다.");
         }
         catch (Exception ex)
         {

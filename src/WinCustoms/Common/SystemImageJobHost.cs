@@ -111,32 +111,39 @@ public static class SystemImageJobHost
         if (File.Exists(imageFile))
             File.Delete(imageFile);
 
+        // 스크래치는 저장 드라이브에 둔다. C: TEMP 를 쓰면 섀도 캡처와 경합·지연이 난다.
+        var scratchDir = Path.Combine(directory, ".wincustoms-dism-scratch");
+        Directory.CreateDirectory(scratchDir);
+
         WriteProgress(request, 1, $"볼륨 섀도 복사본 생성 중 ({volume})...");
         var shadowId = CreateShadowCopy(volume);
-        string? captureDir = null;
+        string? mountLink = null;
 
         try
         {
             ThrowIfCancelled(request);
-            captureDir = ResolveShadowDevicePath(shadowId);
-            WriteProgress(request, 3, "DISM 으로 이미지를 캡처하는 중...");
+            var devicePath = ResolveShadowDevicePath(shadowId);
+            WriteProgress(request, 2, "섀도 복사본을 캡처 경로에 연결하는 중...");
+            mountLink = MountShadowLink(devicePath);
+            WriteProgress(request, 3, "DISM 캡처 시작 (파일 수가 많으면 처음 수 분은 %가 안 오를 수 있음)...");
 
             var dism = ResolveDismPath();
             var name = string.IsNullOrWhiteSpace(request.ImageName) ? "WinCustoms Backup" : request.ImageName.Trim();
             var description = $"WinCustoms system backup {DateTime.Now:yyyy-MM-dd HH:mm}";
 
+            // /CheckIntegrity 는 캡처 시간을 크게 늘리고 초반에 멈춘 것처럼 보이게 해서 제외.
             var args = new[]
             {
                 "/Capture-Image",
                 $"/ImageFile:{imageFile}",
-                $"/CaptureDir:{captureDir}",
+                $"/CaptureDir:{mountLink}",
                 $"/Name:{name}",
                 $"/Description:{description}",
                 "/Compress:fast",
-                "/CheckIntegrity"
+                $"/ScratchDir:{scratchDir}"
             };
 
-            RunDism(dism, args, request);
+            RunDism(dism, args, request, watchFile: imageFile);
 
             if (!File.Exists(imageFile))
                 throw new InvalidOperationException("캡처가 끝났지만 WIM 파일이 만들어지지 않았습니다.");
@@ -146,7 +153,9 @@ public static class SystemImageJobHost
         }
         finally
         {
+            TryUnmountShadowLink(mountLink);
             TryDeleteShadowCopy(shadowId);
+            TryDeleteDirectory(scratchDir);
         }
     }
 
@@ -191,7 +200,11 @@ public static class SystemImageJobHost
         TryRunBcdBoot(windowsDir, request);
     }
 
-    private static void RunDism(string dismPath, IReadOnlyList<string> arguments, SystemImageJobRequest request)
+    private static void RunDism(
+        string dismPath,
+        IReadOnlyList<string> arguments,
+        SystemImageJobRequest request,
+        string? watchFile = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -199,11 +212,9 @@ public static class SystemImageJobHost
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            // DISM 진행률이 콘솔 인코딩에 맞춰 나오도록.
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
+            RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
@@ -213,80 +224,105 @@ public static class SystemImageJobHost
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
+        var gate = new object();
         var lastPercent = -1;
+        var startedUtc = DateTime.UtcNow;
+        Exception? readerFault = null;
 
         void HandleChunk(string chunk, StringBuilder sink)
         {
             if (string.IsNullOrEmpty(chunk)) return;
-            sink.Append(chunk);
 
-            foreach (Match match in PercentRegex.Matches(chunk))
+            lock (gate)
             {
-                if (!double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var value))
-                    continue;
+                sink.Append(chunk);
 
-                var percent = (int)Math.Clamp(Math.Round(value), 0, 100);
-                // 캡처/적용 본문은 5~90 구간에 매핑해 앞뒤 단계 여유를 둔다.
-                var mapped = 5 + (int)Math.Round(percent * 0.85);
-                if (mapped == lastPercent) continue;
-                lastPercent = mapped;
-                WriteProgress(request, mapped, $"DISM {percent}%");
-            }
-
-            // 줄 단위 메시지도 남긴다.
-            if (chunk.Contains('\n') || chunk.Contains('\r'))
-            {
-                var text = chunk.Replace('\r', '\n');
-                foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                foreach (Match match in PercentRegex.Matches(chunk))
                 {
-                    if (line.Length is 0 or > 200) continue;
-                    if (PercentRegex.IsMatch(line) && line.Length < 40) continue;
-                    WriteProgress(request, null, line);
+                    if (!double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var value))
+                        continue;
+
+                    var percent = (int)Math.Clamp(Math.Round(value), 0, 100);
+                    // 캡처/적용 본문은 5~90 구간에 매핑해 앞뒤 단계 여유를 둔다.
+                    var mapped = 5 + (int)Math.Round(percent * 0.85);
+                    if (mapped == lastPercent) continue;
+                    lastPercent = mapped;
+                    WriteProgress(request, mapped, $"DISM {percent}%");
+                }
+
+                if (chunk.Contains('\n') || chunk.Contains('\r'))
+                {
+                    var text = chunk.Replace('\r', '\n');
+                    foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (line.Length is 0 or > 200) continue;
+                        if (PercentRegex.IsMatch(line) && line.Length < 40) continue;
+                        if (IsDismNoiseLine(line)) continue;
+                        WriteProgress(request, null, line);
+                    }
                 }
             }
+        }
 
-            ThrowIfCancelled(request);
-            if (File.Exists(request.CancelFile))
-            {
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
-                throw new OperationCanceledException();
-            }
+        void TryCancelProcess()
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
         }
 
         var stdoutTask = Task.Run(() =>
         {
-            var buffer = new char[512];
-            while (true)
+            try
             {
-                var read = process.StandardOutput.Read(buffer, 0, buffer.Length);
-                if (read <= 0) break;
-                HandleChunk(new string(buffer, 0, read), stdout);
+                var buffer = new char[512];
+                while (true)
+                {
+                    var read = process.StandardOutput.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    HandleChunk(new string(buffer, 0, read), stdout);
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (gate) readerFault ??= ex;
             }
         });
 
         var stderrTask = Task.Run(() =>
         {
-            var buffer = new char[512];
-            while (true)
+            try
             {
-                var read = process.StandardError.Read(buffer, 0, buffer.Length);
-                if (read <= 0) break;
-                HandleChunk(new string(buffer, 0, read), stderr);
+                var buffer = new char[512];
+                while (true)
+                {
+                    var read = process.StandardError.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    HandleChunk(new string(buffer, 0, read), stderr);
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (gate) readerFault ??= ex;
             }
         });
 
-        while (!process.WaitForExit(400))
+        // DISM 은 리다이렉트 시 % 출력이 늦게 오거나 버퍼링되는 경우가 많다.
+        // WIM 파일 성장으로라도 UI가 살아 있음을 보여 준다.
+        while (!process.WaitForExit(1000))
         {
             ThrowIfCancelled(request);
             if (File.Exists(request.CancelFile))
             {
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                TryCancelProcess();
                 throw new OperationCanceledException();
             }
+
+            ReportDismHeartbeat(request, watchFile, startedUtc, ref lastPercent, gate);
         }
 
         Task.WaitAll(stdoutTask, stderrTask);
+        if (readerFault is not null)
+            throw new InvalidOperationException("DISM 출력을 읽는 중 오류: " + readerFault.Message, readerFault);
 
         if (process.ExitCode != 0)
         {
@@ -295,6 +331,79 @@ public static class SystemImageJobHost
             if (detail.Length > 800) detail = detail[^800..];
             throw new InvalidOperationException($"DISM 종료 코드 {process.ExitCode}. {detail}");
         }
+    }
+
+    private static void ReportDismHeartbeat(
+        SystemImageJobRequest request,
+        string? watchFile,
+        DateTime startedUtc,
+        ref int lastPercent,
+        object gate)
+    {
+        long bytes = 0;
+        if (!string.IsNullOrWhiteSpace(watchFile))
+        {
+            try
+            {
+                if (File.Exists(watchFile))
+                    bytes = new FileInfo(watchFile).Length;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        var elapsed = DateTime.UtcNow - startedUtc;
+        var sizeText = FormatByteSize(bytes);
+        var timeText = elapsed.TotalHours >= 1
+            ? elapsed.ToString(@"h\:mm\:ss")
+            : elapsed.ToString(@"mm\:ss");
+
+        lock (gate)
+        {
+            // DISM % 가 아직 없으면 3~4% 근처에서 살아있음을 표시.
+            if (lastPercent < 5)
+            {
+                var soft = bytes > 0 ? 4 : 3;
+                if (soft != lastPercent)
+                    lastPercent = soft;
+                WriteProgress(request, soft,
+                    bytes > 0
+                        ? $"캡처 진행 중… {sizeText} 기록 · 경과 {timeText}"
+                        : $"캡처 준비/스캔 중… 경과 {timeText} (잠시 %가 안 변할 수 있음)");
+            }
+            else if (bytes > 0)
+            {
+                WriteProgress(request, null, $"기록 중 {sizeText} · 경과 {timeText}");
+            }
+        }
+    }
+
+    private static bool IsDismNoiseLine(string line)
+    {
+        // "버전: 10.0...." / "Version:" / 저작권 배너 등은 상태줄만 지저분하게 만든다.
+        if (line.StartsWith("버전", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Version", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Copyright", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Deployment Image Servicing", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static string FormatByteSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        double value = bytes;
+        string[] units = ["KB", "MB", "GB", "TB"];
+        foreach (var unit in units)
+        {
+            value /= 1024.0;
+            if (value < 1024.0)
+                return $"{value:0.#} {unit}";
+        }
+
+        return $"{value:0.#} PB";
     }
 
     private static void TryRunBcdBoot(string windowsDir, SystemImageJobRequest request)
@@ -313,6 +422,7 @@ public static class SystemImageJobHost
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
+            ConsoleEncoding.ApplyTo(psi);
             psi.ArgumentList.Add(windowsDir);
             psi.ArgumentList.Add("/f");
             psi.ArgumentList.Add("UEFI");
@@ -386,6 +496,100 @@ public static class SystemImageJobHost
         return path;
     }
 
+    /// <summary>
+    /// DISM 은 \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN 경로에서
+    /// 오래 걸리거나 진행률이 안 나오는 경우가 있어, 디렉터리 심볼릭 링크로 붙인다.
+    /// </summary>
+    private static string MountShadowLink(string deviceObject)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WinCustoms", "shadows");
+        Directory.CreateDirectory(root);
+        var link = Path.Combine(root, Guid.NewGuid().ToString("N"));
+
+        var target = deviceObject.Trim();
+        if (!target.EndsWith('\\'))
+            target += "\\";
+
+        // cmd mklink 가 GLOBALROOT 심볼릭 링크를 가장 안정적으로 만든다.
+        var psi = new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            Arguments = $"/c mklink /D \"{link}\" \"{target}\""
+        };
+        ConsoleEncoding.ApplyTo(psi);
+
+        using var process = Process.Start(psi)
+                            ?? throw new InvalidOperationException("mklink 를 시작할 수 없습니다.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* */ }
+            throw new TimeoutException("mklink 가 시간 초과되었습니다.");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+
+        if (process.ExitCode != 0 || !Directory.Exists(link))
+        {
+            var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            throw new InvalidOperationException(
+                "섀도 복사본 연결(mklink)에 실패했습니다. " + Truncate(detail.Trim(), 300));
+        }
+
+
+        // DISM CaptureDir 은 끝의 \ 없이 주어도 되지만, 디렉터리임을 분명히 한다.
+        return link;
+    }
+
+    private static void TryUnmountShadowLink(string? link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        try
+        {
+            if (Directory.Exists(link))
+                Directory.Delete(link);
+        }
+        catch
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    Arguments = $"/c rmdir \"{link}\""
+                };
+                using var p = Process.Start(psi);
+                p?.WaitForExit(10_000);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private static void TryDeleteDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private static void TryDeleteShadowCopy(string shadowId)
     {
         try
@@ -419,6 +623,7 @@ public static class SystemImageJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         psi.ArgumentList.Add("-NoProfile");
         psi.ArgumentList.Add("-NonInteractive");
         psi.ArgumentList.Add("-ExecutionPolicy");
@@ -429,9 +634,16 @@ public static class SystemImageJobHost
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException("PowerShell 을 시작할 수 없습니다.");
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit(120_000);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(120_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* */ }
+            throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
 
         if (process.ExitCode != 0)
         {
@@ -459,7 +671,7 @@ public static class SystemImageJobHost
             };
 
             var json = JsonSerializer.Serialize(line, WinCustomsJsonContext.Default.SystemImageProgressLine);
-            File.AppendAllText(request.ProgressFile, json + Environment.NewLine);
+            File.AppendAllText(request.ProgressFile, json + Environment.NewLine, Encoding.UTF8);
         }
         catch
         {

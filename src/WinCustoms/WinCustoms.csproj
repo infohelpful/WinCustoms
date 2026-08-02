@@ -107,6 +107,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260709004" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.18" />
+    <!-- DISM/powercfg/reg 등 콘솔 도구의 CP949(OEM) 출력 디코딩용. .NET 기본 Encoding.Default 는 UTF-8. -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.8" />
   </ItemGroup>
 
   <ItemGroup>

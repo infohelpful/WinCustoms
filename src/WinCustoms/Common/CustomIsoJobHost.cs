@@ -106,6 +106,7 @@ public static class CustomIsoJobHost
 
             ThrowIfCancelled(request);
             var installMedia = FindInstallMedia(extractDir);
+            ClearReadOnlyAttribute(installMedia);
             Progress(request, 20, "설치 이미지: " + Path.GetFileName(installMedia));
 
             var wimPath = installMedia;
@@ -119,8 +120,13 @@ public static class CustomIsoJobHost
                 mountIndex = 1;
             }
 
+            // ISO에서 복사된 WIM 은 읽기 전용인 경우가 많고, 그대로면 DISM 0xc1510111 이 난다.
+            ClearReadOnlyAttribute(wimPath);
+            ClearReadOnlyAttribute(Path.Combine(extractDir, "sources", "boot.wim"));
+
             ThrowIfCancelled(request);
-            Progress(request, 35, $"install.wim 마운트 (index {mountIndex})...");
+            Progress(request, 35,
+                $"install.wim 마운트 (index {mountIndex})… 용량에 따라 수 분~십수 분 걸릴 수 있습니다");
             RunDism([
                 "/Mount-Image",
                 $"/ImageFile:{wimPath}",
@@ -321,6 +327,8 @@ public static class CustomIsoJobHost
         if (!File.Exists(bootWim))
             throw new FileNotFoundException("sources\\boot.wim 이 없습니다. 순정 설치 ISO인지 확인하세요.", bootWim);
 
+        ClearReadOnlyAttribute(bootWim);
+
         var indexes = GetImageInfos(bootWim);
         if (indexes.Count == 0)
             throw new InvalidOperationException("boot.wim 인덱스를 읽지 못했습니다.");
@@ -482,17 +490,29 @@ public static class CustomIsoJobHost
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8
+            RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         psi.ArgumentList.Add("/Get-ImageInfo");
         psi.ArgumentList.Add("/ImageFile:" + imageFile);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("DISM 실행 실패");
-        var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
-        p.WaitForExit(120_000);
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(120_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* */ }
+            throw new TimeoutException("DISM /Get-ImageInfo 가 시간 초과되었습니다.");
+        }
 
-        return ParseImageInfo(output);
+        var output = stdoutTask.GetAwaiter().GetResult() + stderrTask.GetAwaiter().GetResult();
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"DISM 종료 코드 {p.ExitCode}. {output.Trim()}");
+
+        var list = ParseImageInfo(output);
+        if (list.Count == 0)
+            throw new InvalidOperationException("이미지 인덱스 정보를 해석하지 못했습니다.");
+        return list;
     }
 
     internal static List<WindowsImageInfo> ParseImageInfo(string output)
@@ -502,8 +522,11 @@ public static class CustomIsoJobHost
 
         foreach (var raw in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
-            var line = raw.Trim();
-            var indexMatch = Regex.Match(line, @"^(?:Index|인덱스)\s*:\s*(\d+)", RegexOptions.IgnoreCase);
+            var line = raw.Trim().TrimStart('\uFEFF');
+            // 전각 콜론(：) 도 허용. 한국어 DISM 은 "인덱스" / 일부 환경 "색인".
+            var indexMatch = Regex.Match(line,
+                @"^(?:Index|인덱스|색인)\s*[:：]\s*(\d+)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             if (indexMatch.Success)
             {
                 if (current is not null) list.Add(current);
@@ -513,21 +536,21 @@ public static class CustomIsoJobHost
 
             if (current is null) continue;
 
-            var nameMatch = Regex.Match(line, @"^(?:Name|이름)\s*:\s*(.+)$", RegexOptions.IgnoreCase);
+            var nameMatch = Regex.Match(line, @"^(?:Name|이름)\s*[:：]\s*(.+)$", RegexOptions.IgnoreCase);
             if (nameMatch.Success)
             {
                 current.Name = nameMatch.Groups[1].Value.Trim();
                 continue;
             }
 
-            var descMatch = Regex.Match(line, @"^(?:Description|설명)\s*:\s*(.+)$", RegexOptions.IgnoreCase);
+            var descMatch = Regex.Match(line, @"^(?:Description|설명)\s*[:：]\s*(.+)$", RegexOptions.IgnoreCase);
             if (descMatch.Success)
             {
                 current.Description = descMatch.Groups[1].Value.Trim();
                 continue;
             }
 
-            var sizeMatch = Regex.Match(line, @"^(?:Size|크기)\s*:\s*([\d,]+)", RegexOptions.IgnoreCase);
+            var sizeMatch = Regex.Match(line, @"^(?:Size|크기)\s*[:：]\s*([\d,]+)", RegexOptions.IgnoreCase);
             if (sizeMatch.Success
                 && long.TryParse(sizeMatch.Groups[1].Value.Replace(",", ""), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size))
             {
@@ -538,6 +561,10 @@ public static class CustomIsoJobHost
         if (current is not null) list.Add(current);
         return list;
     }
+
+    private static readonly Regex PercentRegex = new(
+        @"(\d{1,3}(?:\.\d+)?)\s*%",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static void RunDism(IReadOnlyList<string> args, CustomIsoJobRequest request, bool ignoreExit = false)
     {
@@ -561,13 +588,83 @@ public static class CustomIsoJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException(file + " 실행 실패");
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
+        var gate = new object();
+        var lastStatus = Path.GetFileName(file) + " 실행 중…";
+        var startedUtc = DateTime.UtcNow;
+        Exception? readerFault = null;
 
-        while (!p.WaitForExit(400))
+        void HandleChunk(string chunk, StringBuilder sink)
+        {
+            if (string.IsNullOrEmpty(chunk)) return;
+            lock (gate)
+            {
+                sink.Append(chunk);
+
+                foreach (Match match in PercentRegex.Matches(chunk))
+                {
+                    if (double.TryParse(match.Groups[1].Value, NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var value))
+                    {
+                        var percent = (int)Math.Clamp(Math.Round(value), 0, 100);
+                        lastStatus = $"{Path.GetFileName(file)} {percent}%";
+                        // 마운트 구간(35)과 다음 단계(50) 사이에 살짝 반영
+                        var mapped = 35 + (int)Math.Round(percent * 0.14);
+                        Progress(request, mapped, lastStatus);
+                    }
+                }
+
+                if (chunk.Contains('\n') || chunk.Contains('\r'))
+                {
+                    foreach (var line in chunk.Replace('\r', '\n')
+                                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (line.Length is 0 or > 180) continue;
+                        if (line.StartsWith("버전", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (line.StartsWith("Version", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (line.StartsWith("Copyright", StringComparison.OrdinalIgnoreCase)) continue;
+                        lastStatus = line;
+                    }
+                }
+            }
+        }
+
+        var stdoutTask = Task.Run(() =>
+        {
+            try
+            {
+                var buffer = new char[512];
+                while (true)
+                {
+                    var read = p.StandardOutput.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    HandleChunk(new string(buffer, 0, read), stdout);
+                }
+            }
+            catch (Exception ex) { lock (gate) readerFault ??= ex; }
+        });
+
+        var stderrTask = Task.Run(() =>
+        {
+            try
+            {
+                var buffer = new char[512];
+                while (true)
+                {
+                    var read = p.StandardError.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+                    HandleChunk(new string(buffer, 0, read), stderr);
+                }
+            }
+            catch (Exception ex) { lock (gate) readerFault ??= ex; }
+        });
+
+        while (!p.WaitForExit(1500))
         {
             ThrowIfCancelled(request);
             if (!string.IsNullOrWhiteSpace(request.CancelFile) && File.Exists(request.CancelFile))
@@ -575,10 +672,19 @@ public static class CustomIsoJobHost
                 try { p.Kill(entireProcessTree: true); } catch { /* */ }
                 throw new OperationCanceledException();
             }
+
+            var elapsed = DateTime.UtcNow - startedUtc;
+            var time = elapsed.TotalHours >= 1
+                ? elapsed.ToString(@"h\:mm\:ss")
+                : elapsed.ToString(@"mm\:ss");
+            string status;
+            lock (gate) status = lastStatus;
+            Progress(request, null, $"{status} · 경과 {time}");
         }
 
-        stdout.Append(p.StandardOutput.ReadToEnd());
-        stderr.Append(p.StandardError.ReadToEnd());
+        Task.WaitAll(stdoutTask, stderrTask);
+        if (readerFault is not null)
+            throw new InvalidOperationException("프로세스 출력을 읽는 중 오류: " + readerFault.Message, readerFault);
 
         if (!ignoreExit && p.ExitCode != 0)
         {
@@ -608,6 +714,7 @@ public static class CustomIsoJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         psi.ArgumentList.Add("-NoProfile");
         psi.ArgumentList.Add("-NonInteractive");
         psi.ArgumentList.Add("-ExecutionPolicy");
@@ -616,9 +723,16 @@ public static class CustomIsoJobHost
         psi.ArgumentList.Add(encoded);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("PowerShell 실행 실패");
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
-        p.WaitForExit(600_000);
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(600_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* */ }
+            throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
 
         if (p.ExitCode != 0)
         {
@@ -641,7 +755,8 @@ public static class CustomIsoJobHost
                 UtcTicks = DateTime.UtcNow.Ticks
             };
             File.AppendAllText(request.ProgressFile,
-                JsonSerializer.Serialize(line, WinCustomsJsonContext.Default.SystemImageProgressLine) + Environment.NewLine);
+                JsonSerializer.Serialize(line, WinCustomsJsonContext.Default.SystemImageProgressLine) + Environment.NewLine,
+                Encoding.UTF8);
         }
         catch
         {
@@ -653,6 +768,21 @@ public static class CustomIsoJobHost
     {
         if (!string.IsNullOrWhiteSpace(request.CancelFile) && File.Exists(request.CancelFile))
             throw new OperationCanceledException();
+    }
+
+    private static void ClearReadOnlyAttribute(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        try
+        {
+            var attrs = File.GetAttributes(path);
+            if ((attrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly);
+        }
+        catch
+        {
+            // ignore — 마운트 단계에서 다시 실패 메시지로 드러난다.
+        }
     }
 
     private static void TryDelete(string path)
