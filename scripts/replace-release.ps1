@@ -62,6 +62,36 @@ function Fail([string]$text) {
     exit 1
 }
 
+# requireAdministrator 앱은 비관리자 셸에서 Stop-Process 가 Access Denied 난다.
+function Stop-ManagedProcess([System.Diagnostics.Process]$proc) {
+    if ($null -eq $proc) { return }
+    $id = $proc.Id
+    try {
+        if (-not $proc.HasExited) {
+            Stop-Process -Id $id -Force -ErrorAction Stop
+        }
+    }
+    catch {
+        $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+        $code = RunQuiet $taskkill @('/F', '/PID', "$id")
+        if ($code -ne 0) {
+            Note "관리자 권한으로 프로세스($id) 종료 시도…"
+            try {
+                $p = Start-Process -FilePath $taskkill -ArgumentList @('/F', '/PID', "$id") `
+                    -Verb RunAs -Wait -PassThru -WindowStyle Hidden
+                if ($null -ne $p -and $p.ExitCode -ne 0 -and $p.ExitCode -ne 128) {
+                    Fail "스모크 테스트 프로세스를 종료하지 못했습니다 (PID $id). 작업 관리자에서 WinCustoms 를 닫고 다시 실행하세요."
+                }
+            }
+            catch {
+                Fail "스모크 테스트 프로세스를 종료하지 못했습니다 (PID $id). 작업 관리자에서 WinCustoms 를 닫고 다시 실행하세요."
+            }
+        }
+    }
+
+    try { $proc.WaitForExit(10000) | Out-Null } catch { }
+}
+
 function RunQuiet([string]$exe, [string[]]$cmdArgs) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -193,7 +223,7 @@ if (-not $SkipSmokeTest) {
         Fail ("실행하자마자 종료되었습니다 (종료 코드 0x{0:X8}). %LOCALAPPDATA%\WinCustoms\startup.log 를 확인하세요." -f $proc.ExitCode)
     }
 
-    Stop-Process -Id $proc.Id -Force
+    Stop-ManagedProcess $proc
     if (-not $windowShown) { Fail '15초 안에 창이 뜨지 않았습니다.' }
 
     Note '정상 실행 확인'
