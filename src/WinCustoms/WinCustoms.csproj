@@ -15,7 +15,7 @@
     <AssemblyName>WinCustoms</AssemblyName>
     <Product>WinCustoms</Product>
     <Company>WinCustoms</Company>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
 
     <Platforms>x64;ARM64</Platforms>
     <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">x64</Platform>
