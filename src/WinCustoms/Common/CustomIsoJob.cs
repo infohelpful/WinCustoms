@@ -21,6 +21,15 @@ public sealed class CustomIsoJobRequest
     /// <summary>이 PC의 드라이버를 export 한 뒤 install.wim·boot.wim 에 주입.</summary>
     public bool InjectHostDrivers { get; set; }
 
+    /// <summary>OOBE에서 Microsoft 온라인 계정 화면을 건너뛰고 로컬 계정 경로를 연다(BypassNRO 등).</summary>
+    public bool SkipOnlineAccount { get; set; }
+
+    /// <summary>OOBE 개인정보·진단·맞춤 설정 화면을 건너뛴다.</summary>
+    public bool SkipPrivacyExperience { get; set; }
+
+    /// <summary>로컬 관리자 계정 이름. 비어 있지 않으면 설치 후 해당 계정으로 바로 로그인 가능.</summary>
+    public string LocalAccountName { get; set; } = string.Empty;
+
     public string ProgressFile { get; set; } = string.Empty;
     public string ResultFile { get; set; } = string.Empty;
     public string CancelFile { get; set; } = string.Empty;

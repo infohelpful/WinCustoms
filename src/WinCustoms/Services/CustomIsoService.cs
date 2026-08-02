@@ -23,6 +23,9 @@ public interface ICustomIsoService
         IReadOnlyList<string> appxPackageNames,
         bool bypassSetupRequirements,
         bool injectHostDrivers,
+        bool skipOnlineAccount,
+        bool skipPrivacyExperience,
+        string? localAccountName,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default);
 }
@@ -174,6 +177,9 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         IReadOnlyList<string> appxPackageNames,
         bool bypassSetupRequirements,
         bool injectHostDrivers,
+        bool skipOnlineAccount,
+        bool skipPrivacyExperience,
+        string? localAccountName,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default)
     {
@@ -196,7 +202,10 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
             RegistryOperations = ops,
             AppxPackageNames = appxPackageNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             BypassSetupRequirements = bypassSetupRequirements,
-            InjectHostDrivers = injectHostDrivers
+            InjectHostDrivers = injectHostDrivers,
+            SkipOnlineAccount = skipOnlineAccount,
+            SkipPrivacyExperience = skipPrivacyExperience,
+            LocalAccountName = (localAccountName ?? string.Empty).Trim()
         };
 
         return await RunElevatedAsync(request, progress, ct).ConfigureAwait(false);

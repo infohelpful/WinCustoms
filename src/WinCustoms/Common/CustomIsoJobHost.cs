@@ -167,6 +167,15 @@ public static class CustomIsoJobHost
                 ApplyInstallImageBypass(mountDir, request);
             }
 
+            if (CustomIsoUnattend.NeedsUnattend(request))
+            {
+                ThrowIfCancelled(request);
+                Progress(request, 76, "OOBE 간편 설치(레지스트리) 적용...");
+                var oobeOps = CustomIsoUnattend.BuildOfflineRegistryOps(request);
+                if (oobeOps.Count > 0)
+                    OfflineRegistryApplier.Apply(mountDir, oobeOps, m => Progress(request, null, m));
+            }
+
             ThrowIfCancelled(request);
             Progress(request, 78, "install.wim 저장(언마운트)...");
             RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
@@ -182,6 +191,13 @@ public static class CustomIsoJobHost
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
                     request);
+            }
+
+            if (CustomIsoUnattend.NeedsUnattend(request))
+            {
+                ThrowIfCancelled(request);
+                Progress(request, 88, "autounattend.xml 작성...");
+                CustomIsoUnattend.WriteAutounattendXml(extractDir, request);
             }
 
             ThrowIfCancelled(request);

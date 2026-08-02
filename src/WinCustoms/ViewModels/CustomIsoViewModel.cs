@@ -109,7 +109,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     public string Title => "커스텀 ISO";
 
     public string Subtitle =>
-        "순정 Windows 11 ISO에 탐색기·작업표시줄·개인정보·성능 트윅과 기본 앱 제거를 이식해, "
+        "순정 Windows 11 ISO에 트윅·앱 제거·OOBE 간편 설정(온라인 계정·개인정보 건너뛰기, 로컬 계정)을 이식해 "
         + "클린 설치용 커스텀 ISO를 만듭니다.";
 
     /// <summary>플랫 목록(빌드 시 선택 집계용).</summary>
@@ -139,6 +139,18 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     /// <summary>이 PC에 설치된 드라이버를 ISO(install/boot.wim)에 주입.</summary>
     [ObservableProperty]
     public partial bool InjectHostDrivers { get; set; }
+
+    /// <summary>OOBE Microsoft 온라인 계정 건너뛰기.</summary>
+    [ObservableProperty]
+    public partial bool SkipOnlineAccount { get; set; } = true;
+
+    /// <summary>OOBE 개인정보·진단 설정 건너뛰기.</summary>
+    [ObservableProperty]
+    public partial bool SkipPrivacyExperience { get; set; } = true;
+
+    /// <summary>설치 직후 사용할 로컬 관리자 계정 이름(빈 비밀번호).</summary>
+    [ObservableProperty]
+    public partial string LocalAccountName { get; set; } = "admin";
 
     [ObservableProperty]
     public partial bool IsDebloatExpanded { get; set; }
@@ -365,18 +377,33 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var localName = (LocalAccountName ?? string.Empty).Trim();
+        var accountError = CustomIsoUnattend.ValidateAccountName(localName);
+        if (accountError is not null)
+        {
+            StatusMessage = accountError;
+            await _dialog.ShowMessageAsync("계정 이름", accountError);
+            return;
+        }
+
+        var hasOobe = SkipOnlineAccount || SkipPrivacyExperience || localName.Length > 0;
+
         if (selectedTweaks.Count == 0
             && appNames.Count == 0
             && !BypassSetupRequirements
-            && !InjectHostDrivers)
+            && !InjectHostDrivers
+            && !hasOobe)
         {
-            StatusMessage = "트윅·앱 제거·설치 검사 우회·드라이버 주입 중 하나 이상을 선택하세요.";
+            StatusMessage = "트윅·앱 제거·설치 옵션·OOBE 간편 설정 중 하나 이상을 선택하세요.";
             return;
         }
 
         var extras = new List<string>();
         if (BypassSetupRequirements) extras.Add("설치 검사 우회");
         if (InjectHostDrivers) extras.Add("현재 PC 드라이버 주입");
+        if (SkipOnlineAccount) extras.Add("온라인 계정 건너뛰기");
+        if (SkipPrivacyExperience) extras.Add("개인정보 화면 건너뛰기");
+        if (localName.Length > 0) extras.Add($"로컬 계정: {localName}");
 
         var confirmed = await _dialog.ConfirmAsync(
             "커스텀 ISO 만들기",
@@ -391,6 +418,9 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             + "· 관리자 권한(UAC)이 필요합니다.\n"
             + "· 결과 ISO는 클린 설치용입니다 (업그레이드 설치는 효과가 제한적일 수 있음).\n"
             + "· 드라이버 주입은 이 PC와 같은(또는 호환) 하드웨어용입니다.\n"
+            + (localName.Length > 0
+                ? "· 로컬 계정은 비밀번호 없이 만들어지며, 설치 직후 한 번 자동 로그인됩니다.\n"
+                : string.Empty)
             + "· 순정 ISO는 사용자가 적법하게 보유한 파일이어야 합니다.\n\n"
             + "시작할까요?",
             "ISO 만들기");
@@ -408,6 +438,9 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 appNames,
                 BypassSetupRequirements,
                 InjectHostDrivers,
+                SkipOnlineAccount,
+                SkipPrivacyExperience,
+                localName,
                 progress,
                 ct);
 
