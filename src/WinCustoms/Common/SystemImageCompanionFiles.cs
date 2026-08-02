@@ -110,6 +110,7 @@ public static class SystemImageCompanionFiles
             throw new FileNotFoundException("WIM 파일을 찾을 수 없습니다.", fullImage);
 
         Write(fullImage, Path.GetFileNameWithoutExtension(fullImage));
+        ClearSiblingFlags(fullImage, AutoCaptureFlagFileName);
         WriteVolumeFlag(fullImage, AutoRestoreFlagFileName, GetAutoRestoreFlagPath(fullImage), imageName: null);
     }
 
@@ -133,7 +134,32 @@ public static class SystemImageCompanionFiles
             name = "WinCustoms Backup";
 
         Write(fullImage, name);
+        ClearSiblingFlags(fullImage, AutoRestoreFlagFileName);
         WriteVolumeFlag(fullImage, AutoCaptureFlagFileName, GetAutoCaptureFlagPath(fullImage), name);
+    }
+
+    private static void ClearSiblingFlags(string fullImage, string otherRootFlagName)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(fullImage);
+            if (!string.IsNullOrEmpty(root))
+            {
+                var rootFlag = Path.Combine(root, otherRootFlagName);
+                if (File.Exists(rootFlag)) File.Delete(rootFlag);
+            }
+
+            var dir = Path.GetDirectoryName(fullImage);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                var side = Path.Combine(dir, otherRootFlagName);
+                if (File.Exists(side)) File.Delete(side);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private static void WriteVolumeFlag(string fullImage, string rootFlagName, string sideFlagPath, string? imageName)
@@ -144,13 +170,19 @@ public static class SystemImageCompanionFiles
         if (relative.StartsWith("..", StringComparison.Ordinal))
             throw new InvalidOperationException("WIM 경로를 드라이브 기준으로 표현할 수 없습니다.");
 
+        relative = relative.Replace('/', '\\');
+        var wimFile = Path.GetFileName(fullImage);
+
         var content = new StringBuilder();
-        content.Append("WIM=").Append(relative.Replace('/', '\\')).AppendLine();
+        // WIM= 드라이브 루트 기준 상대경로 / WIMFILE= 파일명(플래그가 WIM 옆에 있을 때용)
+        content.Append("WIM=").Append(relative).AppendLine();
+        content.Append("WIMFILE=").Append(wimFile).AppendLine();
         if (!string.IsNullOrWhiteSpace(imageName))
             content.Append("NAME=").Append(imageName).AppendLine();
         content.Append("CREATED=").Append(DateTime.Now.ToString("O")).AppendLine();
 
         var text = content.ToString();
+        // 1) 드라이브 루트  2) WIM 과 같은 폴더 — WinRE 에서 둘 다 찾는다.
         File.WriteAllText(Path.Combine(root, rootFlagName), text,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         File.WriteAllText(sideFlagPath, text,
@@ -158,204 +190,276 @@ public static class SystemImageCompanionFiles
     }
 
     /// <summary>
-    /// WinRE 이미지 안에 넣을 부트 래퍼.
-    /// AutoCapture → AutoRestore → 기본 복구 UI 순.
+    /// WinRE 부트 래퍼.
+    /// 플래그: 드라이브 루트 + WIM 옆(하위 폴더 dir /s). USB 대기 후 캡처/복원.
     /// </summary>
     public static string BuildWinReBootstrapScript()
         => """
             @echo off
-            setlocal EnableExtensions
+            setlocal EnableExtensions EnableDelayedExpansion
             title WinCustoms
             echo.
             echo ========================================
             echo   WinCustoms
             echo ========================================
             echo.
+            echo Waiting for USB / flag (up to ~60 sec)...
+            echo Flag is on the backup drive root OR next to the .wim file.
+            echo.
 
-            rem --- Auto CAPTURE (offline WIM) ---
             set "CAPFLAG="
             set "CAPDRIVE="
-            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
-              if exist "%%D:\WinCustoms-AutoCapture.flag" (
-                set "CAPFLAG=%%D:\WinCustoms-AutoCapture.flag"
-                set "CAPDRIVE=%%D:"
-                goto :havecap
-              )
-            )
-            :havecap
-            if not "%CAPFLAG%"=="" goto :docapture
-
-            rem --- Auto RESTORE ---
             set "FLAGFILE="
             set "FLAGDRIVE="
-            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
-              if exist "%%D:\WinCustoms-AutoRestore.flag" (
-                set "FLAGFILE=%%D:\WinCustoms-AutoRestore.flag"
-                set "FLAGDRIVE=%%D:"
-                goto :haverestore
-              )
+            set "TRY=0"
+
+            :findflags
+            set "CAPFLAG="
+            set "CAPDRIVE="
+            set "FLAGFILE="
+            set "FLAGDRIVE="
+
+            call :SearchFlag WinCustoms-AutoCapture.flag CAP
+            if not "!CAPFLAG!"=="" goto :docapture
+
+            call :SearchFlag WinCustoms-AutoRestore.flag RES
+            if not "!FLAGFILE!"=="" goto :dorestore
+
+            set /a TRY+=1
+            if !TRY! LSS 30 (
+              echo   retry !TRY!/30 ...
+              ping -n 3 127.0.0.1 >nul
+              goto :findflags
             )
-            :haverestore
-            if not "%FLAGFILE%"=="" goto :dorestore
 
-            goto :normalui
-
-            :docapture
-            echo Auto-capture flag found: %CAPFLAG%
             echo.
-            set "WIMNAME="
-            set "IMGNAME=WinCustoms Backup"
-            for /f "usebackq tokens=1,* delims==" %%A in ("%CAPFLAG%") do (
-              if /i "%%A"=="WIM" set "WIMNAME=%%B"
-              if /i "%%A"=="NAME" set "IMGNAME=%%B"
-            )
-            if "%WIMNAME%"=="" (
-              echo ERROR: WIM= missing in capture flag.
+            echo ERROR: Flag not found.
+            echo Expected: WinCustoms-AutoRestore.flag ^(or AutoCapture^)
+            echo   - on USB root, OR
+            echo   - in the same folder as the .wim
+            echo.
+            goto :hold
+
+            rem ---------- CAPTURE ----------
+            :docapture
+            echo Auto-capture flag: !CAPFLAG!
+            call :ReadFlag "!CAPFLAG!"
+            call :ResolveWim "!CAPDRIVE!" "!CAPFLAG!"
+            if "!WIMFILE!"=="" goto :capfail
+            if not exist "!WIMFILE!" (
+              echo ERROR: WIM path not found: !WIMFILE!
               goto :capfail
             )
 
-            set "WIMFILE=%CAPDRIVE%\%WIMNAME%"
-            for %%I in ("%WIMFILE%") do set "WIMDIR=%%~dpI"
-            if not exist "%WIMDIR%" mkdir "%WIMDIR%" >nul 2>&1
+            for %%I in ("!WIMFILE!") do set "WIMDIR=%%~dpI"
+            if not exist "!WIMDIR!" mkdir "!WIMDIR!" >nul 2>&1
 
-            echo Searching Windows partition...
-            set "WINVOL="
-            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
-              if exist "%%D:\Windows\System32\config\SOFTWARE" if exist "%%D:\Windows\System32\ntoskrnl.exe" (
-                set "WINVOL=%%D:"
-                goto :capfoundwin
-              )
-            )
-            :capfoundwin
-            if "%WINVOL%"=="" (
+            call :FindWinVol
+            if "!WINVOL!"=="" (
               echo ERROR: Windows partition not found.
               goto :capfail
             )
 
-            set "SCRATCH=%CAPDRIVE%\WinCustoms-DismScratch"
-            if not exist "%SCRATCH%" mkdir "%SCRATCH%" >nul 2>&1
+            set "SCRATCH=!CAPDRIVE!\WinCustoms-DismScratch"
+            if not exist "!SCRATCH!" mkdir "!SCRATCH!" >nul 2>&1
 
+            echo Source : !WINVOL!\
+            echo Output : !WIMFILE!
+            echo Name   : !IMGNAME!
             echo.
-            echo Source : %WINVOL%\
-            echo Output : %WIMFILE%
-            echo Name   : %IMGNAME%
-            echo.
-            echo Capturing offline image. This takes a long time. Do not power off.
+            echo Capturing... Do not power off.
             echo.
 
-            if exist "%WIMFILE%" del /f /q "%WIMFILE%" >nul 2>&1
-
-            dism.exe /Capture-Image /ImageFile:"%WIMFILE%" /CaptureDir:%WINVOL%\ /Name:"%IMGNAME%" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"%SCRATCH%"
+            if exist "!WIMFILE!" del /f /q "!WIMFILE!" >nul 2>&1
+            dism.exe /Capture-Image /ImageFile:"!WIMFILE!" /CaptureDir:!WINVOL!\ /Name:"!IMGNAME!" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"!SCRATCH!"
             if errorlevel 1 (
               echo DISM capture failed.
               goto :capfail
             )
 
-            del /f /q "%CAPFLAG%" >nul 2>&1
-            if exist "%CAPDRIVE%\WinCustoms-AutoCapture.flag" del /f /q "%CAPDRIVE%\WinCustoms-AutoCapture.flag" >nul 2>&1
-            rem also remove side-by-side flag if present
-            for %%I in ("%WIMFILE%") do if exist "%%~dpIWinCustoms-AutoCapture.flag" del /f /q "%%~dpIWinCustoms-AutoCapture.flag" >nul 2>&1
-
-            rmdir /s /q "%SCRATCH%" >nul 2>&1
-
-            echo.
-            echo Capture finished. Rebooting in 8 seconds...
+            call :DeleteFlags "!CAPFLAG!" "!WIMFILE!" WinCustoms-AutoCapture.flag
+            rmdir /s /q "!SCRATCH!" >nul 2>&1
+            echo Capture finished. Rebooting...
             ping -n 9 127.0.0.1 >nul
             wpeutil reboot
             exit /b 0
 
             :capfail
-            echo.
-            echo Auto-capture failed. Opening Command Prompt.
-            echo Flag left for retry: %CAPFLAG%
-            echo.
-            start "WinCustoms" %SYSTEMROOT%\System32\cmd.exe
-            exit /b 1
+            echo Auto-capture FAILED.
+            goto :hold
 
+            rem ---------- RESTORE ----------
             :dorestore
-            echo Auto-restore flag found: %FLAGFILE%
-            echo.
-            set "WIMNAME="
-            for /f "usebackq tokens=1,* delims==" %%A in ("%FLAGFILE%") do (
-              if /i "%%A"=="WIM" set "WIMNAME=%%B"
-            )
-            if "%WIMNAME%"=="" (
-              echo ERROR: WIM= missing in flag file.
+            echo Auto-restore flag: !FLAGFILE!
+            call :ReadFlag "!FLAGFILE!"
+            call :ResolveWim "!FLAGDRIVE!" "!FLAGFILE!"
+            if "!WIMFILE!"=="" goto :fail
+            if not exist "!WIMFILE!" (
+              echo ERROR: WIM not found: !WIMFILE!
+              echo Keep USB plugged in. Flag folder: !FLAGFILE!
               goto :fail
             )
 
-            set "WIMFILE=%FLAGDRIVE%\%WIMNAME%"
-            if not exist "%WIMFILE%" (
-              echo ERROR: WIM not found: %WIMFILE%
-              echo Keep the USB/external drive plugged in.
-              goto :fail
-            )
-
-            echo Searching Windows partition...
-            set "WINVOL="
-            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
-              if exist "%%D:\Windows\System32\config\SOFTWARE" if exist "%%D:\Windows\System32\ntoskrnl.exe" (
-                set "WINVOL=%%D:"
-                goto :foundwin
-              )
-            )
-            :foundwin
-            if "%WINVOL%"=="" (
+            call :FindWinVol
+            if "!WINVOL!"=="" (
               echo ERROR: Windows partition not found.
               goto :fail
             )
 
+            echo Image : !WIMFILE!
+            echo Target: !WINVOL!
             echo.
-            echo Image : %WIMFILE%
-            echo Target: %WINVOL%
-            echo.
-            echo Applying backup. This takes a long time. Do not power off.
+            echo Applying backup... Do not power off.
             echo.
 
-            dism.exe /Apply-Image /ImageFile:"%WIMFILE%" /Index:1 /ApplyDir:%WINVOL%\ /CheckIntegrity
+            dism.exe /Apply-Image /ImageFile:"!WIMFILE!" /Index:1 /ApplyDir:!WINVOL!\ /CheckIntegrity
             if errorlevel 1 (
               echo DISM failed.
               goto :fail
             )
 
             echo Updating boot...
-            bcdboot.exe %WINVOL%\Windows /f UEFI
+            bcdboot.exe !WINVOL!\Windows /f UEFI
 
-            del /f /q "%FLAGFILE%" >nul 2>&1
-
-            echo.
-            echo Restore finished. Rebooting in 8 seconds...
+            call :DeleteFlags "!FLAGFILE!" "!WIMFILE!" WinCustoms-AutoRestore.flag
+            echo Restore finished. Rebooting...
             ping -n 9 127.0.0.1 >nul
             wpeutil reboot
             exit /b 0
 
             :fail
+            echo Auto-restore FAILED.
+            echo You can run 복원-C드라이브.cmd from the WIM folder.
+            goto :hold
+
+            :hold
             echo.
-            echo Auto-restore failed. Opening Command Prompt.
-            echo You can run 복원-C드라이브.cmd from the USB folder.
-            echo.
-            echo Flag file left in place for retry: %FLAGFILE%
-            echo.
-            start "WinCustoms" %SYSTEMROOT%\System32\cmd.exe
+            "%SYSTEMROOT%\System32\cmd.exe" /k "echo WinCustoms paused in WinRE. Type exit when finished."
             exit /b 1
 
-            :normalui
-            echo No auto flag. Starting Windows Recovery...
-            if exist "%SYSTEMROOT%\System32\Recovery\RecEnv.exe" (
-              "%SYSTEMROOT%\System32\Recovery\RecEnv.exe"
-              goto :afterui
+            rem ===== helpers =====
+
+            :SearchFlag
+            rem %1=flag file name  %2=CAP or RES
+            set "_NAME=%~1"
+            set "_MODE=%~2"
+
+            rem 1) drive roots
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\!_NAME!" (
+                if /i "!_MODE!"=="CAP" (
+                  set "CAPFLAG=%%D:\!_NAME!"
+                  set "CAPDRIVE=%%D:"
+                ) else (
+                  set "FLAGFILE=%%D:\!_NAME!"
+                  set "FLAGDRIVE=%%D:"
+                )
+                exit /b 0
+              )
             )
-            if exist "%SYSTEMDRIVE%\sources\recovery\RecEnv.exe" (
-              "%SYSTEMDRIVE%\sources\recovery\RecEnv.exe"
-              goto :afterui
+
+            rem 2) next to WIM / subfolders — skip OS volume ^(slow^), scan other drives
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\" (
+                if not exist "%%D:\Windows\System32\ntoskrnl.exe" (
+                  for /f "delims=" %%F in ('dir /s /b "%%D:\!_NAME!" 2^>nul') do (
+                    if /i "!_MODE!"=="CAP" (
+                      set "CAPFLAG=%%F"
+                      set "CAPDRIVE=%%D:"
+                    ) else (
+                      set "FLAGFILE=%%F"
+                      set "FLAGDRIVE=%%D:"
+                    )
+                    exit /b 0
+                  )
+                )
+              )
             )
-            if exist "X:\sources\recovery\RecEnv.exe" (
-              "X:\sources\recovery\RecEnv.exe"
-              goto :afterui
+
+            rem 3) also search OS volume shallow: one level of folders ^(WIM often on D/E but just in case^)
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\Windows\System32\ntoskrnl.exe" (
+                for /d %%P in ("%%D:\*") do (
+                  if exist "%%~fP\!_NAME!" (
+                    if /i "!_MODE!"=="CAP" (
+                      set "CAPFLAG=%%~fP\!_NAME!"
+                      set "CAPDRIVE=%%D:"
+                    ) else (
+                      set "FLAGFILE=%%~fP\!_NAME!"
+                      set "FLAGDRIVE=%%D:"
+                    )
+                    exit /b 0
+                  )
+                )
+              )
             )
-            echo RecEnv.exe not found. Opening cmd.
-            start "WinRE" %SYSTEMROOT%\System32\cmd.exe
-            :afterui
+            exit /b 1
+
+            :ReadFlag
+            set "WIMREL="
+            set "WIMBASENAME="
+            set "IMGNAME=WinCustoms Backup"
+            for /f "usebackq tokens=1,* delims==" %%A in ("%~1") do (
+              if /i "%%A"=="WIM" set "WIMREL=%%B"
+              if /i "%%A"=="WIMFILE" set "WIMBASENAME=%%B"
+              if /i "%%A"=="NAME" set "IMGNAME=%%B"
+            )
+            rem trim spaces
+            for /f "tokens=* delims= " %%T in ("!WIMREL!") do set "WIMREL=%%T"
+            for /f "tokens=* delims= " %%T in ("!WIMBASENAME!") do set "WIMBASENAME=%%T"
+            if "!WIMBASENAME!"=="" if not "!WIMREL!"=="" (
+              for %%I in ("!WIMREL!") do set "WIMBASENAME=%%~nxI"
+            )
+            exit /b 0
+
+            :ResolveWim
+            rem %1=drive like E:   %2=flag full path
+            set "WIMFILE="
+            set "_DRV=%~1"
+            set "_FLG=%~2"
+
+            rem a) drive root + relative WIM=
+            if not "!WIMREL!"=="" (
+              set "WIMFILE=!_DRV!\!WIMREL!"
+              if exist "!WIMFILE!" exit /b 0
+            )
+
+            rem b) same folder as flag + WIMFILE basename
+            if not "!WIMBASENAME!"=="" (
+              for %%I in ("!_FLG!") do set "WIMFILE=%%~dpI!WIMBASENAME!"
+              if exist "!WIMFILE!" exit /b 0
+            )
+
+            rem c) same folder as flag + WIMREL as relative name only
+            if not "!WIMREL!"=="" (
+              for %%I in ("!_FLG!") do set "WIMFILE=%%~dpI!WIMREL!"
+              if exist "!WIMFILE!" exit /b 0
+              for %%I in ("!WIMREL!") do (
+                for %%J in ("!_FLG!") do set "WIMFILE=%%~dpJ%%~nxI"
+              )
+              if exist "!WIMFILE!" exit /b 0
+            )
+
+            set "WIMFILE="
+            exit /b 1
+
+            :FindWinVol
+            set "WINVOL="
+            for %%D in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+              if exist "%%D:\Windows\System32\config\SOFTWARE" if exist "%%D:\Windows\System32\ntoskrnl.exe" (
+                set "WINVOL=%%D:"
+                exit /b 0
+              )
+            )
+            exit /b 1
+
+            :DeleteFlags
+            rem %1=found flag  %2=wim path  %3=flag filename
+            if exist "%~1" del /f /q "%~1" >nul 2>&1
+            for %%I in ("%~2") do (
+              if exist "%%~dpI%~3" del /f /q "%%~dpI%~3" >nul 2>&1
+              if exist "%%~dI\%~3" del /f /q "%%~dI\%~3" >nul 2>&1
+            )
             exit /b 0
             """;
 }
