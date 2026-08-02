@@ -46,6 +46,9 @@ public sealed class ElevationService : IElevationService
         if (job.IsEmpty)
             return new ElevatedJobResult { Success = true };
 
+        // HKCU 기록을 승격 프로세스에서 올바른 사용자 하이브로 보내기 위함.
+        job.TargetUserSid ??= GetCurrentUserSid();
+
         if (IsElevated)
         {
             var inProcess = new ElevatedJobResult();
@@ -103,6 +106,19 @@ public sealed class ElevationService : IElevationService
         {
             TryDelete(jobPath);
             TryDelete(resultPath);
+        }
+    }
+
+    private static string? GetCurrentUserSid()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return identity.User?.Value;
+        }
+        catch
+        {
+            return null;
         }
     }
 

@@ -73,7 +73,7 @@ public static class ElevatedJobHost
         {
             try
             {
-                ApplyRegistryOperation(op);
+                ApplyRegistryOperation(op, job.TargetUserSid);
             }
             catch (Exception ex)
             {
@@ -95,9 +95,33 @@ public static class ElevatedJobHost
     }
 
     public static void ApplyRegistryOperation(RegistryOperation op)
-    {
-        using var root = OpenRoot(op.Root);
+        => ApplyRegistryOperation(op, targetUserSid: null);
 
+    public static void ApplyRegistryOperation(RegistryOperation op, string? targetUserSid)
+    {
+        // 승격 프로세스의 HKCU 는 관리자 계정 하이브라서, UI 사용자 SID 가 있으면 그쪽으로 쓴다.
+        if (op.Root == RegistryRoot.CurrentUser && !string.IsNullOrWhiteSpace(targetUserSid))
+        {
+            ApplyUnderUserSid(targetUserSid, op);
+            return;
+        }
+
+        using var root = OpenRoot(op.Root);
+        ApplyOnRoot(root, op);
+    }
+
+    private static void ApplyUnderUserSid(string sid, RegistryOperation op)
+    {
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default);
+        using var hive = users.OpenSubKey(sid, writable: true)
+                         ?? throw new InvalidOperationException(
+                             $"사용자 하이브(HKEY_USERS\\{sid})를 쓸 수 없습니다. 로그온된 계정의 레지스트리인지 확인하세요.");
+
+        ApplyOnRoot(hive, op);
+    }
+
+    private static void ApplyOnRoot(RegistryKey root, RegistryOperation op)
+    {
         switch (op.Kind)
         {
             case RegistryOperationKind.CreateKey:

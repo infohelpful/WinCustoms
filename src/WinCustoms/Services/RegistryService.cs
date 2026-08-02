@@ -110,6 +110,7 @@ public sealed class RegistryService(IElevationService elevation) : IRegistryServ
         }
 
         var errors = new List<string>();
+        var retryElevated = new List<RegistryOperation>();
 
         foreach (var op in direct)
         {
@@ -118,15 +119,26 @@ public sealed class RegistryService(IElevationService elevation) : IRegistryServ
             {
                 ElevatedJobHost.ApplyRegistryOperation(op);
             }
+            catch (Exception ex) when (
+                !alreadyElevated
+                && op.Root == RegistryRoot.CurrentUser
+                && ex is UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Policies ACL·잠긴 HKCU 값 등 — 승격 후 원래 사용자 SID 하이브에 재시도.
+                retryElevated.Add(op);
+            }
             catch (Exception ex)
             {
                 errors.Add($"{op}: {ex.Message}");
             }
         }
 
-        if (elevated.Count > 0)
+        if (elevated.Count > 0 || retryElevated.Count > 0)
         {
-            var job = new ElevatedJob { RegistryOperations = elevated };
+            var job = new ElevatedJob
+            {
+                RegistryOperations = elevated.Concat(retryElevated).ToList()
+            };
             var result = await _elevation.RunAsync(job, ct).ConfigureAwait(false);
             if (!result.Success)
                 errors.AddRange(result.Errors);

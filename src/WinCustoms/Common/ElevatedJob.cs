@@ -11,6 +11,12 @@ public sealed class ElevatedJob
     public List<RegistryOperation> RegistryOperations { get; set; } = [];
     public List<CommandOperation> Commands { get; set; } = [];
 
+    /// <summary>
+    /// 비승격 UI 프로세스의 사용자 SID.
+    /// 승격 프로세스에서 HKCU 를 쓸 때 관리자 하이브가 아니라 이 사용자 하이브(HKEY_USERS\SID)에 기록한다.
+    /// </summary>
+    public string? TargetUserSid { get; set; }
+
     public bool IsEmpty => RegistryOperations.Count == 0 && Commands.Count == 0;
 }
 

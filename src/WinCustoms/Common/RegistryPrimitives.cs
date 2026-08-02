@@ -70,7 +70,31 @@ public sealed class RegistryOperation
         SubKey = subKey
     };
 
-    public bool RequiresElevation => Root is RegistryRoot.LocalMachine or RegistryRoot.ClassesRoot or RegistryRoot.Users;
+    /// <summary>
+    /// HKLM/HKCR/HKU 는 항상 승격.
+    /// HKCU\Software\Policies 는 ACL/GPO 때문에 일반 권한으로 막히는 경우가 많아 승격한다
+    /// (승격 시에는 원래 사용자 SID 하이브에 기록 — <see cref="ElevatedJob.TargetUserSid"/>).
+    /// </summary>
+    public bool RequiresElevation
+    {
+        get
+        {
+            if (Root is RegistryRoot.LocalMachine or RegistryRoot.ClassesRoot or RegistryRoot.Users)
+                return true;
+
+            if (Root is RegistryRoot.CurrentUser && IsUserPolicyPath(SubKey))
+                return true;
+
+            return false;
+        }
+    }
+
+    private static bool IsUserPolicyPath(string subKey)
+    {
+        if (string.IsNullOrWhiteSpace(subKey)) return false;
+        return subKey.StartsWith(@"Software\Policies\", StringComparison.OrdinalIgnoreCase)
+               || subKey.Equals(@"Software\Policies", StringComparison.OrdinalIgnoreCase);
+    }
 
     public override string ToString() => $"{Kind} {Root}\\{SubKey}" + (string.IsNullOrEmpty(Name) ? "" : $" [{Name}]");
 }
