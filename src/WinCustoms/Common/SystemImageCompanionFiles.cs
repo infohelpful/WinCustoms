@@ -244,15 +244,22 @@ public static class SystemImageCompanionFiles
             :docapture
             echo Auto-capture flag: !CAPFLAG!
             call :ReadFlag "!CAPFLAG!"
-            call :ResolveWim "!CAPDRIVE!" "!CAPFLAG!"
-            if "!WIMFILE!"=="" goto :capfail
-            if not exist "!WIMFILE!" (
-              echo ERROR: WIM path not found: !WIMFILE!
+            rem 캡처는 WIM 이 아직 없음 — 경로만 정하고 폴더를 만든다.
+            call :ResolveWimOut "!CAPDRIVE!" "!CAPFLAG!"
+            if "!WIMFILE!"=="" (
+              echo ERROR: Could not resolve capture output path.
+              echo   WIM=!WIMREL!
+              echo   WIMFILE=!WIMBASENAME!
+              echo   DRIVE=!CAPDRIVE!
               goto :capfail
             )
 
             for %%I in ("!WIMFILE!") do set "WIMDIR=%%~dpI"
             if not exist "!WIMDIR!" mkdir "!WIMDIR!" >nul 2>&1
+            if not exist "!WIMDIR!" (
+              echo ERROR: Cannot create output folder: !WIMDIR!
+              goto :capfail
+            )
 
             call :FindWinVol
             if "!WINVOL!"=="" (
@@ -273,7 +280,7 @@ public static class SystemImageCompanionFiles
             if exist "!WIMFILE!" del /f /q "!WIMFILE!" >nul 2>&1
             dism.exe /Capture-Image /ImageFile:"!WIMFILE!" /CaptureDir:!WINVOL!\ /Name:"!IMGNAME!" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"!SCRATCH!"
             if errorlevel 1 (
-              echo DISM capture failed.
+              echo DISM capture failed. errorlevel=!errorlevel!
               goto :capfail
             )
 
@@ -292,7 +299,7 @@ public static class SystemImageCompanionFiles
             :dorestore
             echo Auto-restore flag: !FLAGFILE!
             call :ReadFlag "!FLAGFILE!"
-            call :ResolveWim "!FLAGDRIVE!" "!FLAGFILE!"
+            call :ResolveWimExisting "!FLAGDRIVE!" "!FLAGFILE!"
             if "!WIMFILE!"=="" goto :fail
             if not exist "!WIMFILE!" (
               echo ERROR: WIM not found: !WIMFILE!
@@ -412,25 +419,37 @@ public static class SystemImageCompanionFiles
             )
             exit /b 0
 
-            :ResolveWim
-            rem %1=drive like E:   %2=flag full path
+            :ResolveWimOut
+            rem 캡처용: 파일이 아직 없어도 출력 경로를 확정한다. %1=drive  %2=flag
             set "WIMFILE="
             set "_DRV=%~1"
             set "_FLG=%~2"
 
-            rem a) drive root + relative WIM=
+            if not "!WIMREL!"=="" (
+              set "WIMFILE=!_DRV!\!WIMREL!"
+              exit /b 0
+            )
+            if not "!WIMBASENAME!"=="" (
+              for %%I in ("!_FLG!") do set "WIMFILE=%%~dpI!WIMBASENAME!"
+              if not "!WIMFILE!"=="" exit /b 0
+            )
+            set "WIMFILE="
+            exit /b 1
+
+            :ResolveWimExisting
+            rem 복원용: 실제 WIM 파일이 있어야 한다. %1=drive  %2=flag
+            set "WIMFILE="
+            set "_DRV=%~1"
+            set "_FLG=%~2"
+
             if not "!WIMREL!"=="" (
               set "WIMFILE=!_DRV!\!WIMREL!"
               if exist "!WIMFILE!" exit /b 0
             )
-
-            rem b) same folder as flag + WIMFILE basename
             if not "!WIMBASENAME!"=="" (
               for %%I in ("!_FLG!") do set "WIMFILE=%%~dpI!WIMBASENAME!"
               if exist "!WIMFILE!" exit /b 0
             )
-
-            rem c) same folder as flag + WIMREL as relative name only
             if not "!WIMREL!"=="" (
               for %%I in ("!_FLG!") do set "WIMFILE=%%~dpI!WIMREL!"
               if exist "!WIMFILE!" exit /b 0
@@ -439,7 +458,6 @@ public static class SystemImageCompanionFiles
               )
               if exist "!WIMFILE!" exit /b 0
             )
-
             set "WIMFILE="
             exit /b 1
 
