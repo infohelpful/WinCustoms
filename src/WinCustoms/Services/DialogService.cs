@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
+using WinCustoms.Common;
 
 namespace WinCustoms.Services;
 
@@ -49,16 +50,19 @@ public sealed class DialogService : IDialogService
         await _gate.WaitAsync().ConfigureAwait(true);
         try
         {
-            var dialog = new ContentDialog
+            await UiThread.InvokeAsync(async () =>
             {
-                Title = title,
-                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
-                CloseButtonText = "확인",
-                DefaultButton = ContentDialogButton.Close,
-                XamlRoot = XamlRoot
-            };
+                var dialog = new ContentDialog
+                {
+                    Title = title,
+                    Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                    CloseButtonText = "확인",
+                    DefaultButton = ContentDialogButton.Close,
+                    XamlRoot = XamlRoot
+                };
 
-            await dialog.ShowAsync();
+                await dialog.ShowAsync();
+            }).ConfigureAwait(true);
         }
         finally
         {
@@ -73,17 +77,20 @@ public sealed class DialogService : IDialogService
         await _gate.WaitAsync().ConfigureAwait(true);
         try
         {
-            var dialog = new ContentDialog
+            return await UiThread.InvokeAsync(async () =>
             {
-                Title = title,
-                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
-                PrimaryButtonText = primaryText,
-                CloseButtonText = closeText,
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = XamlRoot
-            };
+                var dialog = new ContentDialog
+                {
+                    Title = title,
+                    Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                    PrimaryButtonText = primaryText,
+                    CloseButtonText = closeText,
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = XamlRoot
+                };
 
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+                return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            }).ConfigureAwait(true);
         }
         finally
         {
@@ -196,39 +203,42 @@ public sealed class DialogService : IDialogService
         await _gate.WaitAsync().ConfigureAwait(true);
         try
         {
-            var combo = new ComboBox
+            return await UiThread.InvokeAsync(async () =>
             {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                MinWidth = 320
-            };
+                var combo = new ComboBox
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    MinWidth = 320
+                };
 
-            foreach (var (label, value) in options)
-                combo.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+                foreach (var (label, value) in options)
+                    combo.Items.Add(new ComboBoxItem { Content = label, Tag = value });
 
-            combo.SelectedIndex = 0;
+                combo.SelectedIndex = 0;
 
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(new TextBlock
-            {
-                Text = message,
-                TextWrapping = TextWrapping.Wrap
-            });
-            panel.Children.Add(combo);
+                var panel = new StackPanel { Spacing = 12 };
+                panel.Children.Add(new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = TextWrapping.Wrap
+                });
+                panel.Children.Add(combo);
 
-            var dialog = new ContentDialog
-            {
-                Title = title,
-                Content = panel,
-                PrimaryButtonText = primaryText,
-                CloseButtonText = "취소",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = XamlRoot
-            };
+                var dialog = new ContentDialog
+                {
+                    Title = title,
+                    Content = panel,
+                    PrimaryButtonText = primaryText,
+                    CloseButtonText = "취소",
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = XamlRoot
+                };
 
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-                return default;
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                    return default;
 
-            return combo.SelectedItem is ComboBoxItem { Tag: T chosen } ? chosen : default;
+                return combo.SelectedItem is ComboBoxItem { Tag: T chosen } ? chosen : default;
+            }).ConfigureAwait(true);
         }
         finally
         {

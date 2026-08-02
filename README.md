@@ -202,6 +202,18 @@ ARM64 기기용은 `-r win-arm64` 로 바꿔서 게시하세요.
 태그는 GitHub 쪽에 생기고 스크립트가 마지막에 `fetch` 로 로컬에 가져옵니다.
 `dist\` 는 `.gitignore` 에 있어 커밋되지 않습니다.
 
+### 같은 버전으로 zip 만 갈아끼우기
+
+버전 번호를 올리지 않고, 이미 올라간 최신 릴리스의 실행 파일(zip)만 새 빌드로 바꿀 때:
+
+```powershell
+.\scripts\replace-release.ps1 -Message "핫픽스 설명"
+.\scripts\replace-release.ps1 -Tag v1.0.0   # 특정 태그 지정
+.\scripts\replace-release.ps1 -SkipUpload   # 로컬 zip 만
+```
+
+기존 릴리스 자산을 삭제한 뒤 새 zip 을 올리고, 노트·SHA256 을 갱신합니다. `csproj` 의 `<Version>` 은 건드리지 않습니다.
+
 ---
 
 ## 동작 원리 메모

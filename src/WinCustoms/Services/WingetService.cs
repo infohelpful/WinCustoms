@@ -212,7 +212,8 @@ public sealed class WingetService(IShellService shell) : IWingetService
             return;
         }
 
-        _installedIdsCache ??= await ListInstalledIdsAsync(path, ct).ConfigureAwait(false);
+        // 설치 직후 캐시가 낡을 수 있어 항상 다시 조회한다.
+        _installedIdsCache = await ListInstalledIdsAsync(path, ct).ConfigureAwait(false);
 
         foreach (var package in packages)
         {
@@ -245,12 +246,14 @@ public sealed class WingetService(IShellService shell) : IWingetService
 
         var result = await _shell.RunAsync(path, args, ct).ConfigureAwait(false);
 
-        if (result.Succeeded || LooksAlreadyInstalled(result))
+        // winget 은 설치가 끝났어도 재시작 필요·경고 등으로 0이 아닌 코드를 줄 수 있다.
+        // 출력 문구와 실제 list 조회로 성공을 판정한다.
+        if (result.Succeeded
+            || LooksAlreadyInstalled(result)
+            || LooksInstallSucceeded(result)
+            || await IsPackagePresentAsync(path, package.Id, ct).ConfigureAwait(false))
         {
-            package.IsInstalled = true;
-            package.IsSelected = false;
-            package.LastError = null;
-            _installedIdsCache?.Add(package.Id);
+            MarkInstalled(package);
             return;
         }
 
@@ -259,6 +262,48 @@ public sealed class WingetService(IShellService shell) : IWingetService
             : result.Combined.Trim();
 
         throw new InvalidOperationException(Truncate(detail, 400));
+    }
+
+    private void MarkInstalled(WingetPackageInfo package)
+    {
+        package.IsInstalled = true;
+        package.IsSelected = false;
+        package.LastError = null;
+        _installedIdsCache?.Add(package.Id);
+    }
+
+    private async Task<bool> IsPackagePresentAsync(string wingetPath, string id, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _shell.RunAsync(wingetPath,
+            [
+                "list",
+                "--id", id,
+                "--exact",
+                "--disable-interactivity"
+            ], ct).ConfigureAwait(false);
+
+            var output = result.Combined;
+            if (string.IsNullOrWhiteSpace(output)) return false;
+
+            // 미설치 시 영/한 메시지
+            if (output.Contains("No installed package found", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("설치된 패키지를 찾을 수 없습니다", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            foreach (var raw in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (raw.Contains(id, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch
+        {
+            // list 실패 시 설치 판정에 쓰지 않음
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -481,7 +526,25 @@ public sealed class WingetService(IShellService shell) : IWingetService
         var text = result.Combined;
         return text.Contains("already installed", StringComparison.OrdinalIgnoreCase)
                || text.Contains("이미 설치", StringComparison.OrdinalIgnoreCase)
-               || result.ExitCode is -1978335189;
+               || result.ExitCode is -1978335189; // APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED
+    }
+
+    private static bool LooksInstallSucceeded(ProcessResult result)
+    {
+        var text = result.Combined;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // 재시작 필요(설치는 끝난 상태)
+        if (result.ExitCode is -1978334975 or -1978334967 or -1978334964)
+            return true;
+
+        return text.Contains("Successfully installed", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("successfully installed", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Installation successful", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("설치했습니다", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("설치를 완료", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("성공적으로 설치", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("설치가 완료", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Truncate(string text, int max)

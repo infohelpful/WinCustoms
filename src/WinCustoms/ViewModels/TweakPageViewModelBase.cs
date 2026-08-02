@@ -204,9 +204,10 @@ public abstract partial class TweakPageViewModelBase : ObservableObject
 
         try
         {
-            var result = await operation();
+            // 엔진 내부 ConfigureAwait(false) 이후에도 UI 갱신·다이얼로그는 UI 스레드에서.
+            var result = await operation().ConfigureAwait(true);
             UpdateAggregates();
-            await ReportAsync(result, ct);
+            await ReportAsync(result, ct).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {

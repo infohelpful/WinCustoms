@@ -1,3 +1,4 @@
+using WinCustoms.Common;
 using WinCustoms.Models;
 
 namespace WinCustoms.Services;
@@ -102,8 +103,11 @@ public sealed class TweakEngine(IRegistryService registry, IShellService shell) 
         {
             ct.ThrowIfCancellationRequested();
 
-            item.IsBusy = true;
-            item.LastError = null;
+            await UiThread.InvokeAsync(() =>
+            {
+                item.IsBusy = true;
+                item.LastError = null;
+            }).ConfigureAwait(false);
 
             try
             {
@@ -120,7 +124,10 @@ public sealed class TweakEngine(IRegistryService registry, IShellService shell) 
             {
                 // UAC 를 거부하면 이후 항목도 어차피 실패하므로 배치를 중단한다.
                 cancelled = true;
-                item.LastError = "관리자 권한 승인이 취소되었습니다.";
+                await UiThread.InvokeAsync(() =>
+                {
+                    item.LastError = "관리자 권한 승인이 취소되었습니다.";
+                }).ConfigureAwait(false);
                 break;
             }
             catch (OperationCanceledException)
@@ -130,13 +137,19 @@ public sealed class TweakEngine(IRegistryService registry, IShellService shell) 
             }
             catch (Exception ex)
             {
-                item.LastError = ex.Message;
+                await UiThread.InvokeAsync(() =>
+                {
+                    item.LastError = ex.Message;
+                }).ConfigureAwait(false);
                 errors.Add($"[{item.Title}] {ex.Message}");
             }
             finally
             {
-                item.IsBusy = false;
-                item.RefreshState();
+                await UiThread.InvokeAsync(() =>
+                {
+                    item.IsBusy = false;
+                    item.RefreshState();
+                }).ConfigureAwait(false);
             }
         }
 

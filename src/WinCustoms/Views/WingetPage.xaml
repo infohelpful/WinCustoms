@@ -111,12 +111,13 @@
                      IsOpen="{x:Bind views:XamlHelpers.Neither(ViewModel.IsBusy, ViewModel.HasPackages), Mode=OneWay}"
                      Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.WingetAvailable), Mode=OneWay}" />
 
+            <!-- 목록이 비어 있을 때만 중앙 로딩. 설치 중에는 항목 오른쪽·하단 바 ProgressRing만 사용 -->
             <ProgressRing Width="32" Height="32"
                           Margin="0,48,0,0"
                           VerticalAlignment="Top"
                           HorizontalAlignment="Center"
-                          IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
-                          Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsBusy), Mode=OneWay}" />
+                          IsActive="{x:Bind ViewModel.ShowCenterBusy, Mode=OneWay}"
+                          Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.ShowCenterBusy), Mode=OneWay}" />
 
             <ScrollViewer Padding="24,0,24,16"
                           VerticalScrollBarVisibility="Auto"

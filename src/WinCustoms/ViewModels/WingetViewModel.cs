@@ -69,6 +69,9 @@ public sealed partial class WingetViewModel : ObservableObject
 
     public bool HasPackages => Packages.Count > 0;
 
+    /// <summary>목록이 비어 있는 새로 고침/검색 대기 중에만 중앙 ProgressRing.</summary>
+    public bool ShowCenterBusy => IsBusy && !HasPackages;
+
     public bool ShowCatalogActions => IsCatalogTabSelected && WingetAvailable;
 
     public string EmptyMessage
@@ -256,8 +259,12 @@ public sealed partial class WingetViewModel : ObservableObject
     private void NotifyListChanged()
     {
         OnPropertyChanged(nameof(HasPackages));
+        OnPropertyChanged(nameof(ShowCenterBusy));
         OnPropertyChanged(nameof(EmptyMessage));
     }
+
+    partial void OnIsBusyChanged(bool value)
+        => OnPropertyChanged(nameof(ShowCenterBusy));
 
     [RelayCommand]
     private void SelectRecommended()
@@ -330,8 +337,23 @@ public sealed partial class WingetViewModel : ObservableObject
                 }
                 catch (Exception ex)
                 {
-                    fail++;
-                    package.LastError = ex.Message;
+                    // InstallAsync 가 종료 코드만으로 실패 처리했어도, 실제로 깔렸으면 성공으로 본다.
+                    await _winget.RefreshInstalledStateAsync([package], ct);
+                    if (package.IsInstalled)
+                    {
+                        ok++;
+                        package.LastError = null;
+                        package.IsSelected = false;
+                        var catalogItem = _catalog.FirstOrDefault(c =>
+                            string.Equals(c.Id, package.Id, StringComparison.OrdinalIgnoreCase));
+                        if (catalogItem is not null)
+                            catalogItem.IsInstalled = true;
+                    }
+                    else
+                    {
+                        fail++;
+                        package.LastError = ex.Message;
+                    }
                 }
                 finally
                 {
