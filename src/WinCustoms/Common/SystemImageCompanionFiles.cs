@@ -47,23 +47,26 @@ public static class SystemImageCompanionFiles
             → USB/외장은 연결한 채로 두세요.
 
             【복원】 WinCustoms에서 「C: 자동 복원」
-            → WinRE로 다시 시작되면 검은 화면에서 자동으로 C:에 백업을 적용합니다.
+            → WinRE로 다시 시작되면 Windows 파티션을 빠른 포맷한 뒤
+              백업 WIM을 적용합니다. (해당 파티션 내용은 삭제됩니다)
 
             【수동 비상】 Windows가 안 켜질 때
             1) 강제 종료 2~3회로 WinRE 진입 → 명령 프롬프트
             2) USB 문자 확인 후 {RestoreCmdFileName} 실행
+               (스크립트도 대상 파티션을 포맷한 뒤 적용합니다)
 
             BitLocker가 켜져 있으면 WinRE에서 잠금 해제 후 진행하세요.
             """;
 
         var cmd = $"""
             @echo off
-            setlocal EnableExtensions
+            setlocal EnableExtensions EnableDelayedExpansion
             cd /d "%~dp0"
             title WinCustoms - Windows C restore
             echo.
             echo === WinCustoms manual C: restore ===
             echo Run from WinRE Command Prompt only.
+            echo This FORMATS the Windows partition, then applies the WIM.
             echo.
 
             set "WIM=%~dp0{wimName}"
@@ -87,12 +90,33 @@ public static class SystemImageCompanionFiles
               exit /b 1
             )
 
+            for %%I in ("%WIM%") do set "SCRATCH=%%~dI\WinCustoms-DismScratch"
+            if not exist "!SCRATCH!" mkdir "!SCRATCH!" >nul 2>&1
+
             echo Image : %WIM%
-            echo Target: %WINVOL%
+            echo Target: %WINVOL%  ^(will be QUICK-FORMATTED^)
+            echo.
             pause
-            dism.exe /Apply-Image /ImageFile:"%WIM%" /Index:1 /ApplyDir:%WINVOL%\ /CheckIntegrity
-            if errorlevel 1 ( pause & exit /b 1 )
+
+            echo Formatting %WINVOL% ...
+            format %WINVOL% /fs:ntfs /q /y
+            if errorlevel 1 (
+              echo format failed.
+              pause
+              exit /b 1
+            )
+
+            echo Applying image...
+            dism.exe /Apply-Image /ImageFile:"%WIM%" /Index:1 /ApplyDir:%WINVOL%\ /ScratchDir:"!SCRATCH!"
+            if errorlevel 1 (
+              echo DISM failed.
+              pause
+              exit /b 1
+            )
+
+            echo Updating boot...
             bcdboot.exe %WINVOL%\Windows /f UEFI
+            rmdir /s /q "!SCRATCH!" >nul 2>&1
             echo Done. Close window and Continue to reboot.
             pause
             exit /b 0
@@ -303,7 +327,7 @@ public static class SystemImageCompanionFiles
             if "!WIMFILE!"=="" goto :fail
             if not exist "!WIMFILE!" (
               echo ERROR: WIM not found: !WIMFILE!
-              echo Keep USB plugged in. Flag folder: !FLAGFILE!
+              echo Keep USB plugged in. Flag: !FLAGFILE!
               goto :fail
             )
 
@@ -313,22 +337,46 @@ public static class SystemImageCompanionFiles
               goto :fail
             )
 
-            echo Image : !WIMFILE!
-            echo Target: !WINVOL!
-            echo.
-            echo Applying backup... Do not power off.
-            echo.
-
-            dism.exe /Apply-Image /ImageFile:"!WIMFILE!" /Index:1 /ApplyDir:!WINVOL!\ /CheckIntegrity
-            if errorlevel 1 (
-              echo DISM failed.
+            rem Do not format the drive that holds the WIM / flag.
+            if /i "!WINVOL!"=="!FLAGDRIVE!" (
+              echo ERROR: Refusing to format the backup drive !WINVOL!
+              echo Windows volume detection may be wrong.
               goto :fail
             )
 
-            echo Updating boot...
+            set "SCRATCH=!FLAGDRIVE!\WinCustoms-DismScratch"
+            if not exist "!SCRATCH!" mkdir "!SCRATCH!" >nul 2>&1
+
+            echo Image : !WIMFILE!
+            echo Target: !WINVOL!
+            echo.
+            echo Step 1/3 - Quick-format Windows partition...
+            echo ALL DATA on !WINVOL! will be erased.
+            echo.
+            format !WINVOL! /fs:ntfs /q /y
+            if errorlevel 1 (
+              echo format failed on !WINVOL!
+              goto :fail
+            )
+
+            echo.
+            echo Step 2/3 - Applying WIM... Do not power off.
+            echo.
+            dism.exe /Apply-Image /ImageFile:"!WIMFILE!" /Index:1 /ApplyDir:!WINVOL!\ /ScratchDir:"!SCRATCH!"
+            if errorlevel 1 (
+              echo DISM failed. errorlevel=!errorlevel!
+              goto :fail
+            )
+
+            echo.
+            echo Step 3/3 - Updating boot ^(bcdboot^)...
             bcdboot.exe !WINVOL!\Windows /f UEFI
+            if errorlevel 1 (
+              echo bcdboot warning - check boot manually if Windows does not start.
+            )
 
             call :DeleteFlags "!FLAGFILE!" "!WIMFILE!" WinCustoms-AutoRestore.flag
+            rmdir /s /q "!SCRATCH!" >nul 2>&1
             echo Restore finished. Rebooting...
             ping -n 9 127.0.0.1 >nul
             wpeutil reboot
@@ -336,7 +384,7 @@ public static class SystemImageCompanionFiles
 
             :fail
             echo Auto-restore FAILED.
-            echo You can run 복원-C드라이브.cmd from the WIM folder.
+            echo Manual: run restore CMD next to the WIM in WinRE.
             goto :hold
 
             :hold

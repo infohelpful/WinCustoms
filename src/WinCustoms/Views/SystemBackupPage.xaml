@@ -63,7 +63,7 @@
                     <StackPanel Spacing="12">
                         <TextBlock Text="2. C: 자동 복원" Style="{StaticResource SubtitleTextBlockStyle}" />
                         <TextBlock Style="{StaticResource DescriptionTextStyle}"
-                                   Text="복원할 WIM을 고른 뒤 「C: 자동 복원」을 누르면, 컴퓨터가 다시 시작된 다음 복원이 자동으로 시작됩니다." />
+                                   Text="복원할 WIM을 고른 뒤 「C: 자동 복원」을 누르면, 다시 시작 후 WinRE에서 Windows 파티션을 포맷하고 WIM을 적용합니다." />
 
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>

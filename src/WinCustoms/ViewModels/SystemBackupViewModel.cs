@@ -171,11 +171,14 @@ public sealed partial class SystemBackupViewModel : ObservableObject
 
         var confirmed = await _dialog.ConfirmAsync(
             "C: 자동 복원",
-            "「C: 자동 복원」을 진행하면 컴퓨터가 다시 시작된 뒤, 선택한 백업으로 C: 복원이 자동 시작됩니다.\n\n"
+            "「C: 자동 복원」을 진행하면 컴퓨터가 다시 시작된 뒤 WinRE에서:\n\n"
+            + "1) Windows 파티션을 빠른 포맷(내용 삭제)\n"
+            + "2) 선택한 WIM 적용\n"
+            + "3) 부팅 구성(bcdboot)\n\n"
             + $"WIM: {RestoreImagePath}\n\n"
-            + "· 백업이 있는 디스크는 연결해 두세요.\n"
-            + "· C:가 백업 시점 내용으로 바뀝니다.\n"
-            + "· 관리자 권한(UAC)이 필요합니다.\n"
+            + "· 백업 디스크는 연결해 두세요.\n"
+            + "· Windows가 있는 파티션 데이터는 모두 지워집니다.\n"
+            + "· BitLocker면 WinRE에서 잠금 해제하세요.\n"
             + "· 복원 중에는 전원을 끄지 마세요.\n\n"
             + "계속할까요?",
             "자동 복원 시작");
