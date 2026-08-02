@@ -17,8 +17,33 @@
         </Grid.RowDefinitions>
 
         <!-- ── 페이지 헤더 ─────────────────────────────────────── -->
-        <StackPanel Grid.Row="0" Margin="24,16,24,12" Spacing="2">
-            <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="{x:Bind ViewModel.Title}" />
+        <StackPanel Grid.Row="0" Margin="24,16,24,12" Spacing="8">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Style="{StaticResource PageTitleTextStyle}"
+                           Text="{x:Bind ViewModel.Title}"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap" />
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                    <Button Content="전체 비활성화"
+                            Command="{x:Bind ViewModel.DisableAllCommand}"
+                            ToolTipService.ToolTip="이 페이지의 토글을 모두 끕니다. 반영하려면 하단에서 '선택 항목 적용'을 누르세요." />
+                    <Button Content="전체 활성화"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Command="{x:Bind ViewModel.EnableAllCommand}"
+                            ToolTipService.ToolTip="이 페이지의 토글을 모두 켭니다. 반영하려면 하단에서 '선택 항목 적용'을 누르세요." />
+                </StackPanel>
+            </Grid>
+
             <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{x:Bind ViewModel.Subtitle}" />
         </StackPanel>
 

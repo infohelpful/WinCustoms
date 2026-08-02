@@ -92,7 +92,7 @@
                     <TextBlock Text="현재 상태" Style="{StaticResource BodyStrongTextBlockStyle}" />
                     <TextBlock Text="{x:Bind ViewModel.AppliedSummary, Mode=OneWay}" Style="{StaticResource DescriptionTextStyle}" />
                     <TextBlock Text="{x:Bind ViewModel.ElevationText}" Style="{StaticResource DescriptionTextStyle}" />
-                    <TextBlock Text="{x:Bind ViewModel.RuntimeInfo}" Style="{StaticResource DescriptionTextStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.RuntimeInfo, Mode=OneWay}" Style="{StaticResource DescriptionTextStyle}" />
 
                     <Button Content="상태 새로 고침"
                             HorizontalAlignment="Left"

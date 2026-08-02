@@ -18,9 +18,6 @@ public static class RegistryPaths
     public const string ClassicContextMenuInprocKey =
         @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32";
 
-    /// <summary>Windows 10 스타일 리본 탐색기를 되살리는 셸 확장 CLSID (23H2 이후 제거됨).</summary>
-    public const string RibbonExplorerClsid = "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}";
-
     /// <summary>탐색기 탐색 창의 '홈' 노드.</summary>
     public const string HomeNodeKey = @"Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}";
 
@@ -51,14 +48,30 @@ public static class RegistryPaths
 
     // ── 작업 표시줄 / 검색 ─────────────────────────────────────
     public const string SearchKey = @"Software\Microsoft\Windows\CurrentVersion\Search";
+    public const string SearchSettings = @"Software\Microsoft\Windows\CurrentVersion\SearchSettings";
+    public const string WindowsSearchPolicy = @"SOFTWARE\Policies\Microsoft\Windows\Windows Search";
     public const string ExplorerPolicyKeyUser = @"Software\Policies\Microsoft\Windows\Explorer";
     public const string StartPolicyDevice = @"SOFTWARE\Microsoft\PolicyManager\current\device\Start";
+    public const string StartMenuInternet = @"SOFTWARE\Clients\StartMenuInternet";
+    public const string MicrosoftEdgeProtocol = @"Software\Classes\microsoft-edge";
+    public const string MsEdgeHtmClass = @"Software\Classes\MSEdgeHTM";
 
     // ── 개인정보 ──────────────────────────────────────────────
     public const string DataCollectionPolicy = @"SOFTWARE\Policies\Microsoft\Windows\DataCollection";
     public const string AdvertisingInfo = @"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo";
+    public const string AdvertisingInfoPolicy = @"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo";
     public const string ContentDeliveryManager = @"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager";
+    public const string CloudContentPolicy = @"SOFTWARE\Policies\Microsoft\Windows\CloudContent";
     public const string PrivacyKey = @"Software\Microsoft\Windows\CurrentVersion\Privacy";
+    public const string SystemPolicy = @"SOFTWARE\Policies\Microsoft\Windows\System";
+    public const string LocationAndSensorsPolicy = @"SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors";
+    public const string InputPersonalization = @"Software\Microsoft\InputPersonalization";
+    public const string TrainedDataStore = @"Software\Microsoft\InputPersonalization\TrainedDataStore";
+    public const string PersonalizationSettings = @"Software\Microsoft\Personalization\Settings";
+    public const string OnlineSpeechPrivacy = @"Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy";
+    public const string ClipboardUser = @"Software\Microsoft\Clipboard";
+    public const string FindMyDevicePolicy = @"SOFTWARE\Policies\Microsoft\FindMyDevice";
+    public const string SmartClipboard = @"Software\Microsoft\Windows\CurrentVersion\SmartActionPlatform\SmartClipboard";
     public const string CopilotPolicyUser = @"Software\Policies\Microsoft\Windows\WindowsCopilot";
     public const string CopilotPolicyMachine = @"SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot";
     public const string WindowsAiPolicy = @"SOFTWARE\Policies\Microsoft\Windows\WindowsAI";
@@ -72,8 +85,18 @@ public static class RegistryPaths
     public const string PowerSchemesKey = @"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes";
     public const string DriverSearching = @"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching";
     public const string WindowsUpdatePolicy = @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate";
+    public const string DeliveryOptimizationPolicy = @"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization";
     public const string DeviceMetadata = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata";
     public const string SystemRestore = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore";
+    public const string GameDvrPolicy = @"SOFTWARE\Policies\Microsoft\Windows\GameDVR";
+    public const string GameDvrUser = @"Software\Microsoft\Windows\CurrentVersion\GameDVR";
+    public const string GameConfigStore = @"System\GameConfigStore";
+    public const string BackgroundAccessApplications = @"Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications";
+    public const string FileSystemKey = @"SYSTEM\CurrentControlSet\Control\FileSystem";
+    public const string PrefetchParameters = @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters";
+    public const string MultimediaSystemProfile = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile";
+    public const string WindowsErrorReporting = @"SOFTWARE\Microsoft\Windows\Windows Error Reporting";
+    public const string RemoteAssistance = @"SYSTEM\CurrentControlSet\Control\Remote Assistance";
 
     // ── 전원 구성표 GUID ──────────────────────────────────────
     public const string UltimatePerformanceGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61";

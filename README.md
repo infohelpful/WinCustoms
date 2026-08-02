@@ -9,12 +9,15 @@ Windows 11 최적화 · 트윅 유틸리티. WinUI 3 (Windows App SDK) + .NET 9 
 
 | 카테고리 | 주요 항목 |
 | --- | --- |
-| 탐색기 · 우클릭 | Windows 10 클래식 우클릭 메뉴, 홈/갤러리 숨김, 리본 UI, '내 PC'로 열기, 확장명·숨김 파일 표시, Compact 보기 |
+| 탐색기 · 우클릭 | Windows 10 클래식 우클릭 메뉴, 홈/갤러리 숨김, '내 PC'로 열기, 확장명·숨김 파일 표시, Compact 보기 |
 | 우클릭 프로그램 등록 및 제거 | 메뉴에 올라온 항목을 훑어 토글로 숨김·복원, 원하는 `.exe` 를 파일/폴더/폴더 배경 메뉴에 추가·삭제 |
-| 작업 표시줄 · 시작 | 왼쪽 정렬, 위젯/검색/작업 보기/Copilot 아이콘 숨김, 시계 초 표시, Bing 웹 검색 차단, '추천' 영역 정리, Open-Shell 안내 |
-| 개인정보 · 광고 | 텔레메트리·광고 ID 차단, Copilot/Recall 비활성화, Edge 백그라운드 상주 차단 |
+| 작업 표시줄 · 시작 | 왼쪽 정렬, 단추 결합 안 함, 웹 검색 패널 끄기, 검색용 브라우저 선택, 아이콘·배지 정리, 추천/점프목록 끄기 |
+| 개인정보 · 광고 | 텔레메트리·광고 ID, 팁/Spotlight, 활동 기록·위치·클립보드, 입력 개인화, Copilot/Recall, Edge 상주 차단 |
 | 기본 앱 정리 | Xbox · Solitaire · 뉴스 · Teams 등 24종 화이트리스트 기반 선택 제거 |
-| 성능 최적화 | Ultimate Performance 전원 구성표, 애니메이션·투명도 끄기, 드라이버 자동 업데이트 차단, 종료 대기 시간 단축 |
+| 프로그램 설치 | Win11 설치 직후용 추천(ExplorerPatcher·Open-Shell·런타임 등) + winget 검색 설치 |
+| 시스템 백업 | C: .wim 백업 · WinRE 자동 복원(명령 입력 없이 다시 시작 후 적용) |
+| 커스텀 Win11 ISO | 순정 ISO에 트윅·디블로트 이식, 설치 요구사항 우회·현재 PC 드라이버 주입 옵션 (ADK oscdimg 필요) |
+| 성능 최적화 | Ultimate Performance, 애니메이션 끄기, 다운로드 최적화·Game DVR·Prefetch 끄기, NTFS/네트워크 스로틀링 조정, 종료 대기 단축 |
 | 파워유저 도구 | 소유권 가져오기, 여기서 터미널 열기, 임시 파일 정리, 시스템 복원 지점 생성 |
 
 ---
@@ -72,6 +75,8 @@ src/WinCustoms/
 │   ├── ElevationService.cs       UAC 승격 위임
 │   ├── MaintenanceService.cs     전원 구성표 · 임시 파일 · 복원 지점
 │   ├── AppxService.cs            기본 앱 목록/제거
+│   ├── WingetService.cs          winget 패키지 카탈로그 · 설치
+│   ├── SystemImageService.cs     시스템 WIM 캡처 · 복원 (DISM/VSS)
 │   ├── ContextMenuService.cs     사용자 우클릭 항목 등록/제거
 │   ├── ShellMenuInventoryService.cs  시스템 전체 우클릭 항목 수집 · 숨김/복원
 │   ├── DialogService.cs          ContentDialog · 파일 피커
@@ -79,7 +84,7 @@ src/WinCustoms/
 │   └── Catalog/                  카테고리별 트윅 정의 (partial 분할)
 │
 ├── ViewModels/                   MainViewModel + 카테고리별 뷰모델
-└── Views/                        TweakListPage(공용) · ContextMenuEditorPage · DebloatPage · SettingsPage
+└── Views/                        TweakListPage(공용) · ContextMenuEditorPage · DebloatPage · WingetPage · SystemBackupPage · SettingsPage
 ```
 
 `ContextMenuEditorPage` 는 SelectorBar 로 두 탭을 나눈다. 기본은 **제거** 탭이고, **등록** 탭이 두 번째다.
@@ -257,8 +262,7 @@ UIPI 때문에 탐색기에서 창으로 파일을 끌어다 놓는 것도 막�
 
 ## 알려진 제약
 
-- **리본 탐색기**(`explorer.ribbon-ui`)는 Windows 11 21H2 · 22H2 에서만 동작합니다.
-  23H2 이후 빌드에는 해당 셸 확장이 남아 있지 않아 토글해도 변화가 없습니다.
+- **Prefetch · Superfetch 끄기**는 SSD·메모리가 충분한 PC 에 맞춘 옵션입니다. HDD 나 저메모리 환경에서는 앱 실행이 느려질 수 있습니다.
 - **시작 메뉴 '추천' 영역 완전 제거**는 Pro/Enterprise 정책(`HideRecommendedSection`)이 필요합니다.
   Home 에디션에서는 목록만 비워집니다.
 - **기본 앱 제거**는 현재 사용자 계정 기준입니다. 복구는 Microsoft Store 에서 수동 재설치로만 가능합니다.

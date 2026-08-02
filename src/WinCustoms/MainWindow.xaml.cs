@@ -121,6 +121,9 @@ public sealed partial class MainWindow : Window
         {
             NavigationTags.ContextMenu => typeof(ContextMenuEditorPage),
             NavigationTags.Debloat => typeof(DebloatPage),
+            NavigationTags.Winget => typeof(WingetPage),
+            NavigationTags.SystemBackup => typeof(SystemBackupPage),
+            NavigationTags.CustomIso => typeof(CustomIsoPage),
             NavigationTags.Settings => typeof(SettingsPage),
             _ => null
         };

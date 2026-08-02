@@ -60,6 +60,15 @@ public sealed partial class TweakItem : ObservableObject
     /// <summary>적용 전에 백업(.reg)할 레지스트리 키 목록.</summary>
     public IReadOnlyList<(RegistryRoot Root, string SubKey)> BackupKeys { get; init; } = [];
 
+    /// <summary>
+    /// 오프라인 이미지(커스텀 ISO)에 이식할 레지스트리 적용 연산.
+    /// null 이면 레지스트리로 표현되지 않는 트윅이라 ISO에 넣을 수 없다.
+    /// </summary>
+    public IReadOnlyList<RegistryOperation>? OfflineApplyOperations { get; init; }
+
+    /// <summary>커스텀 ISO에 이식 가능한 레지스트리 토글인지.</summary>
+    public bool SupportsOfflineImage => OfflineApplyOperations is { Count: > 0 };
+
     public required Func<CancellationToken, Task> ApplyAction { get; init; }
 
     /// <summary>동작형 트윅도 되돌릴 것이 없으면 완료된 Task 를 돌려주는 형태로 반드시 지정한다.</summary>

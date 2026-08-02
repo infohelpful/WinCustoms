@@ -115,6 +115,14 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
+                <NavigationViewItem Content="프로그램 설치"
+                                    Tag="winget"
+                                    ToolTipService.ToolTip="winget 으로 Chrome, 7-Zip, PowerToys 등 자주 쓰는 프로그램을 설치합니다.">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE896;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
                 <NavigationViewItem Content="성능 최적화"
                                     Tag="performance">
                     <NavigationViewItem.Icon>
@@ -126,6 +134,22 @@
                                     Tag="powertools">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE90F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="시스템 백업"
+                                    Tag="sysbackup"
+                                    ToolTipService.ToolTip="현재 Windows를 .wim 복구 이미지로 저장하고, 오프라인 볼륨에 복원합니다.">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE74C;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem Content="커스텀 ISO"
+                                    Tag="customiso"
+                                    ToolTipService.ToolTip="순정 Windows 11 ISO에 트윅·디블로트를 이식한 클린 설치용 ISO를 만듭니다.">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE958;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>

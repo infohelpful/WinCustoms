@@ -22,6 +22,7 @@ public sealed partial class TweakCatalog : ITweakCatalog
     private readonly IShellService _shell;
     private readonly IDialogService _dialog;
     private readonly IMaintenanceService _maintenance;
+    private readonly IBrowserRedirectService _browsers;
 
     private readonly Dictionary<TweakCategory, IReadOnlyList<TweakItem>> _cache = [];
 
@@ -30,13 +31,15 @@ public sealed partial class TweakCatalog : ITweakCatalog
         IRegistryService registry,
         IShellService shell,
         IDialogService dialog,
-        IMaintenanceService maintenance)
+        IMaintenanceService maintenance,
+        IBrowserRedirectService browsers)
     {
         _factory = factory;
         _registry = registry;
         _shell = shell;
         _dialog = dialog;
         _maintenance = maintenance;
+        _browsers = browsers;
     }
 
     public IReadOnlyList<TweakItem> GetTweaks(TweakCategory category)

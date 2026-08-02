@@ -150,6 +150,9 @@ public static class NavigationTags
     public const string Taskbar = "taskbar";
     public const string Privacy = "privacy";
     public const string Debloat = "debloat";
+    public const string Winget = "winget";
+    public const string SystemBackup = "sysbackup";
+    public const string CustomIso = "customiso";
     public const string Performance = "performance";
     public const string PowerTools = "powertools";
     public const string Settings = "settings";

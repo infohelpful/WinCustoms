@@ -13,7 +13,7 @@ public sealed partial class TweakCatalog
         _factory.FromRegistry(
             id: "explorer.hide-home",
             title: "탐색기 탐색 창에서 '홈' 숨기기",
-            description: "파일 탐색기 왼쪽 사이드바에서 Windows 11 의 '홈' 노드를 감춥니다. '즐겨찾기'와 '최근 항목' 목록도 함께 사라집니다.",
+            description: "홈이 켜져 있으면 최근 파일이 노출되고 사이드바가 복잡해집니다. 끄면 즐겨찾기·최근 목록이 숨겨져 정돈됩니다.",
             category: TweakCategory.Explorer,
             specs:
             [
@@ -28,7 +28,7 @@ public sealed partial class TweakCatalog
         _factory.FromRegistry(
             id: "explorer.hide-gallery",
             title: "탐색기 탐색 창에서 '갤러리' 숨기기",
-            description: "사진 라이브러리를 자동으로 훑어 표시하는 '갤러리' 노드를 감춥니다. 사진이 많은 PC 에서는 탐색기 체감 속도가 좋아집니다.",
+            description: "갤러리가 켜져 있으면 사진을 백그라운드로 훑어 탐색기가 느려질 수 있습니다. 끄면 사이드바가 가볍고 빨라집니다.",
             category: TweakCategory.Explorer,
             specs:
             [
@@ -41,29 +41,9 @@ public sealed partial class TweakCatalog
             requiresExplorerRestart: true),
 
         _factory.FromRegistry(
-            id: "explorer.ribbon-ui",
-            title: "Windows 10 스타일 리본 탐색기 사용",
-            description: "탭 대신 리본 메뉴가 있는 Windows 10 탐색기로 되돌립니다. "
-                       + "Windows 11 21H2 · 22H2 에서만 동작하며, 23H2 이후 빌드에서는 효과가 없습니다.",
-            category: TweakCategory.Explorer,
-            specs:
-            [
-                // 값 이름이 CLSID, 값은 빈 문자열인 '차단 목록' 형식이다.
-                new RegistryValueSpec(
-                    RegistryRoot.LocalMachine,
-                    RegistryPaths.ShellExtensionsBlocked,
-                    RegistryPaths.RibbonExplorerClsid,
-                    RegistryValueKind.String,
-                    AppliedValue: string.Empty)
-            ],
-            createKeysOnApply: [(RegistryRoot.LocalMachine, RegistryPaths.ShellExtensionsBlocked)],
-            requiresExplorerRestart: true,
-            risk: TweakRisk.Moderate),
-
-        _factory.FromRegistry(
             id: "explorer.launch-to-thispc",
             title: "탐색기를 '내 PC'로 열기",
-            description: "Win + E 로 탐색기를 열 때 '홈' 대신 '내 PC'가 먼저 표시됩니다.",
+            description: "홈으로 열리면 최근·추천 화면부터 뜹니다. 켜면 드라이브 목록(내 PC)이 바로 보여 이동이 빠릅니다.",
             category: TweakCategory.Explorer,
             specs:
             [
@@ -80,8 +60,7 @@ public sealed partial class TweakCatalog
         _factory.FromRegistry(
             id: "explorer.show-extensions-hidden",
             title: "파일 확장명 및 숨김 파일 표시",
-            description: ".exe · .zip 같은 확장명과 숨김 폴더/파일을 항상 표시합니다. "
-                       + "확장자를 위장한 파일을 구분할 수 있어 보안에도 도움이 됩니다.",
+            description: "확장명·숨김 파일이 꺼져 있으면 위험한 파일을 구분하기 어렵습니다. 켜면 .exe 위장과 숨김 항목을 바로 볼 수 있습니다.",
             category: TweakCategory.Explorer,
             specs:
             [
@@ -99,7 +78,7 @@ public sealed partial class TweakCatalog
         _factory.FromRegistry(
             id: "explorer.compact-mode",
             title: "간격 좁은(Compact) 보기 사용",
-            description: "항목 사이 여백을 줄여 한 화면에 더 많은 파일을 표시합니다. 터치보다 마우스 위주로 쓸 때 유용합니다.",
+            description: "기본 간격은 한 화면에 파일이 적게 보입니다. 켜면 목록이 촘촘해져 스크롤이 줄어듭니다.",
             category: TweakCategory.Explorer,
             specs:
             [
@@ -121,8 +100,7 @@ public sealed partial class TweakCatalog
     private TweakItem ClassicContextMenuTweak() => _factory.FromRegistry(
         id: "explorer.classic-context-menu",
         title: "Windows 10 스타일 클래식 우클릭 메뉴",
-        description: "'추가 옵션 표시'를 거치지 않고 전체 우클릭 메뉴를 바로 표시합니다. "
-                   + "HKCU 범위만 사용하므로 관리자 권한 없이 적용되고, 해제하면 완전히 원래대로 돌아갑니다.",
+        description: "새 우클릭 메뉴는 자주 쓰는 항목이 추가 옵션 안에 숨겨져 클릭이 늘어납니다. 켜면 예전처럼 전체 메뉴가 바로 뜹니다.",
         category: TweakCategory.Explorer,
         specs:
         [

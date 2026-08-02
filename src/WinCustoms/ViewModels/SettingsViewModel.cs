@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
@@ -62,8 +63,23 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     public string RuntimeInfo =>
-        $"WinCustoms 1.0.0 · {Environment.OSVersion.VersionString} · "
+        $"WinCustoms {GetAppVersion()} · {Environment.OSVersion.VersionString} · "
         + (Environment.Is64BitProcess ? "x64" : "x86");
+
+    internal static string GetAppVersion()
+    {
+        var asm = typeof(App).Assembly;
+        var informational = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            // SDK 가 붙이는 +gitsha 등은 UI 에서 숨긴다.
+            var plus = informational.IndexOf('+');
+            return plus > 0 ? informational[..plus] : informational;
+        }
+
+        var v = asm.GetName().Version;
+        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+    }
 
     partial void OnSelectedThemeIndexChanged(int value)
     {
@@ -123,6 +139,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private void Refresh()
     {
         OnPropertyChanged(nameof(AppliedSummary));
+        OnPropertyChanged(nameof(RuntimeInfo));
         StatusMessage = null;
     }
 }

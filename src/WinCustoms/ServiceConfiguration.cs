@@ -18,8 +18,12 @@ internal static class ServiceConfiguration
         services.AddSingleton<IShellService, ShellService>();
         services.AddSingleton<IMaintenanceService, MaintenanceService>();
         services.AddSingleton<IAppxService, AppxService>();
+        services.AddSingleton<IWingetService, WingetService>();
+        services.AddSingleton<ISystemImageService, SystemImageService>();
+        services.AddSingleton<ICustomIsoService, CustomIsoService>();
         services.AddSingleton<IContextMenuService, ContextMenuService>();
         services.AddSingleton<IShellMenuInventoryService, ShellMenuInventoryService>();
+        services.AddSingleton<IBrowserRedirectService, BrowserRedirectService>();
         services.AddSingleton<IDialogService, DialogService>();
         services.AddSingleton<ITweakEngine, TweakEngine>();
 
@@ -35,6 +39,9 @@ internal static class ServiceConfiguration
         services.AddSingleton<PowerToolsViewModel>();
         services.AddSingleton<ContextMenuEditorViewModel>();
         services.AddSingleton<DebloatViewModel>();
+        services.AddSingleton<WingetViewModel>();
+        services.AddSingleton<SystemBackupViewModel>();
+        services.AddSingleton<CustomIsoViewModel>();
         services.AddSingleton<SettingsViewModel>();
 
         services.AddSingleton<TweakPageViewModelLocator>();

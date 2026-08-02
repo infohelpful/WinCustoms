@@ -100,6 +100,33 @@ public abstract partial class TweakPageViewModelBase : ObservableObject
         StatusMessage = null;
     }
 
+    /// <summary>이 페이지의 토글을 모두 켠다. 실제 반영은 하단 '선택 항목 적용' 에서 한다.</summary>
+    [RelayCommand]
+    private void EnableAll()
+    {
+        SetAllRequested(true);
+        StatusMessage = "모든 항목을 켜 두었습니다. 하단에서 '선택 항목 적용'을 누르세요.";
+    }
+
+    /// <summary>이 페이지의 토글을 모두 끈다. 실제 반영은 하단 '선택 항목 적용' 에서 한다.</summary>
+    [RelayCommand]
+    private void DisableAll()
+    {
+        SetAllRequested(false);
+        StatusMessage = "모든 항목을 꺼 두었습니다. 하단에서 '선택 항목 적용'을 누르세요.";
+    }
+
+    private void SetAllRequested(bool requested)
+    {
+        foreach (var tweak in Tweaks)
+        {
+            if (tweak.IsToggle)
+                tweak.IsRequested = requested;
+        }
+
+        UpdateAggregates();
+    }
+
     [RelayCommand]
     private async Task ApplySelectedAsync(CancellationToken ct)
     {

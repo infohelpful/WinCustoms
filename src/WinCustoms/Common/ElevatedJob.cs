@@ -33,13 +33,6 @@ public sealed class ElevatedJobResult
     public List<string> Errors { get; set; } = [];
 }
 
-/// <summary>Native AOT 에서 리플렉션 없이 직렬화하기 위한 소스 생성 컨텍스트.</summary>
-[JsonSourceGenerationOptions(WriteIndented = false)]
-[JsonSerializable(typeof(ElevatedJob))]
-[JsonSerializable(typeof(ElevatedJobResult))]
-[JsonSerializable(typeof(List<CustomContextMenuEntry>))]
-public sealed partial class WinCustomsJsonContext : JsonSerializerContext;
-
 /// <summary>사용자가 우클릭 메뉴에 직접 등록한 프로그램 항목.</summary>
 public sealed class CustomContextMenuEntry
 {

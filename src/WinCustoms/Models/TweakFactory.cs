@@ -62,6 +62,7 @@ public sealed class TweakFactory(IRegistryService registry)
             RequiresSignOut = requiresSignOut,
             LearnMoreUrl = learnMoreUrl,
             BackupKeys = backupKeys,
+            OfflineApplyOperations = applyOps,
             DetectApplied = detect ?? (() => _registry.IsApplied(specs)),
             ApplyAction = ct => _registry.ExecuteAsync(applyOps, ct),
             RestoreAction = ct => _registry.ExecuteAsync(restoreOps, ct)

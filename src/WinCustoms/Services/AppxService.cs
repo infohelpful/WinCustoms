@@ -41,6 +41,9 @@ public interface IAppxService
     /// <summary>제거 후보 목록을 설치 여부와 함께 가져온다.</summary>
     Task<IReadOnlyList<AppxPackageInfo>> LoadCatalogAsync(CancellationToken ct = default);
 
+    /// <summary>로컬 설치 여부 확인 없이 화이트리스트 카탈로그만 반환(커스텀 ISO용).</summary>
+    IReadOnlyList<AppxPackageInfo> GetRemovalCatalog();
+
     Task RefreshInstalledStateAsync(IEnumerable<AppxPackageInfo> packages, CancellationToken ct = default);
 
     /// <summary>현재 사용자 기준으로 앱을 제거한다.</summary>
@@ -105,20 +108,23 @@ public sealed class AppxService(IShellService shell) : IAppxService
     public async Task<IReadOnlyList<AppxPackageInfo>> LoadCatalogAsync(CancellationToken ct = default)
     {
         // 매번 새 인스턴스를 만들어 페이지 간 선택 상태가 섞이지 않도록 한다.
-        var list = Catalog
+        var list = GetRemovalCatalog().ToList();
+        await RefreshInstalledStateAsync(list, ct).ConfigureAwait(false);
+        return list;
+    }
+
+    public IReadOnlyList<AppxPackageInfo> GetRemovalCatalog()
+        => Catalog
             .Select(c => new AppxPackageInfo
             {
                 PackageName = c.PackageName,
                 DisplayName = c.DisplayName,
                 Description = c.Description,
                 RecommendedForRemoval = c.RecommendedForRemoval,
-                Aliases = c.Aliases
+                Aliases = c.Aliases,
+                IsSelected = c.RecommendedForRemoval
             })
             .ToList();
-
-        await RefreshInstalledStateAsync(list, ct).ConfigureAwait(false);
-        return list;
-    }
 
     public async Task RefreshInstalledStateAsync(IEnumerable<AppxPackageInfo> packages, CancellationToken ct = default)
     {

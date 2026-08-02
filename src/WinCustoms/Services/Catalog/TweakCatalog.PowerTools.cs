@@ -25,8 +25,7 @@ public sealed partial class TweakCatalog
         _factory.Action(
             id: "tools.clean-temp",
             title: "임시 파일 즉시 비우기",
-            description: "사용자 임시 폴더, 인터넷 캐시, C:\\Windows\\Temp 를 정리합니다. "
-                       + "사용 중인 파일은 자동으로 건너뛰므로 실행 중인 프로그램에 영향을 주지 않습니다.",
+            description: "임시 파일이 쌓이면 디스크를 잡아먹습니다. 정리하면 공간을 바로 되찾습니다.",
             category: TweakCategory.PowerTools,
             actionText: "지금 정리",
             run: async ct =>
@@ -46,8 +45,7 @@ public sealed partial class TweakCatalog
         _factory.Action(
             id: "tools.restore-point",
             title: "시스템 복원 지점 만들기",
-            description: "현재 상태를 복원 지점으로 저장합니다. 트윅을 적용하기 전에 한 번 눌러 두면 가장 확실한 안전장치가 됩니다. "
-                       + "시스템 보호가 꺼져 있으면 자동으로 켭니다.",
+            description: "복원 지점이 없으면 잘못 건드릴 때 되돌리기 어렵습니다. 만들면 문제 생겼을 때 이전 상태로 돌아갈 수 있습니다.",
             category: TweakCategory.PowerTools,
             actionText: "복원 지점 생성",
             run: ct => _maintenance.CreateRestorePointAsync(
@@ -67,8 +65,7 @@ public sealed partial class TweakCatalog
         return _factory.FromRegistry(
             id: "tools.take-ownership",
             title: "우클릭에 '소유권 가져오기' 추가",
-            description: "접근이 거부된 파일이나 폴더의 소유자를 현재 계정으로 바꾸고 모든 권한을 부여합니다. "
-                       + "메뉴를 누르면 그때 UAC 확인 창이 뜹니다.",
+            description: "권한이 막힌 파일은 지우거나 고치기 어렵습니다. 켜면 우클릭으로 소유권을 바로 가져올 수 있습니다.",
             category: TweakCategory.PowerTools,
             specs:
             [
@@ -108,8 +105,7 @@ public sealed partial class TweakCatalog
         return _factory.FromRegistry(
             id: "tools.open-terminal-here",
             title: $"우클릭에 '{label}' 추가",
-            description: "폴더를 우클릭하거나 폴더 안 빈 공간을 우클릭하면 해당 경로에서 곧바로 터미널이 열립니다. "
-                       + "Windows Terminal 이 설치되어 있으면 자동으로 사용하고, 없으면 PowerShell 로 대체합니다.",
+            description: "터미널을 따로 열고 경로를 찾으면 시간이 걸립니다. 켜면 폴더 우클릭으로 바로 열 수 있습니다.",
             category: TweakCategory.PowerTools,
             specs:
             [

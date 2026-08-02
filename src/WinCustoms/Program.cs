@@ -18,6 +18,12 @@ public static class Program
         if (ElevatedJobHost.IsJobInvocation(args))
             return ElevatedJobHost.Run(args);
 
+        if (SystemImageJobHost.IsJobInvocation(args))
+            return SystemImageJobHost.Run(args);
+
+        if (CustomIsoJobHost.IsJobInvocation(args))
+            return CustomIsoJobHost.Run(args);
+
         // fail-fast 로 사라지기 전에 예외를 파일에 남긴다.
         CrashLog.BeginStartupCapture();
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
