@@ -27,6 +27,7 @@ public sealed partial class SystemBackupViewModel : ObservableObject
 
     public string Subtitle =>
         "C: Windows를 .wim 으로 백업·복원합니다. "
+        + "백업 시 pagefile·hiberfil·Temp 등 불필요 파일은 자동으로 제외합니다. "
         + "작업은 다시 시작 후 WinRE(복구 환경)에서 오프라인으로 진행됩니다.";
 
     public ObservableCollection<string> LogLines { get; } = [];
@@ -107,6 +108,7 @@ public sealed partial class SystemBackupViewModel : ObservableObject
             "「C: 백업 시작」을 진행하면 컴퓨터가 다시 시작된 뒤, WinRE에서 C:를 .wim 으로 캡처합니다.\n\n"
             + $"저장: {ImageFilePath}\n\n"
             + "· 저장 디스크(USB/외장)는 연결해 두세요.\n"
+            + "· pagefile·hiberfil·Temp·Prefetch·업데이트 캐시 등은 제외됩니다.\n"
             + "· BitLocker가 켜져 있으면 WinRE에서 잠금 해제하세요.\n"
             + "· 캡처 중에는 전원을 끄지 마세요.\n"
             + "· 관리자 권한(UAC)이 필요합니다.\n\n"

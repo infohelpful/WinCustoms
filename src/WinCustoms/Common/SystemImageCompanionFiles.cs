@@ -12,6 +12,7 @@ public static class SystemImageCompanionFiles
     public const string AutoRestoreFlagFileName = "WinCustoms-AutoRestore.flag";
     public const string AutoCaptureFlagFileName = "WinCustoms-AutoCapture.flag";
     public const string WinReBootstrapFileName = "WinCustomsWinREBoot.cmd";
+    public const string CaptureConfigFileName = "WinCustoms-WimScript.ini";
 
     public static string GetRestoreCmdPath(string imageFile)
         => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(imageFile))!, RestoreCmdFileName);
@@ -33,6 +34,8 @@ public static class SystemImageCompanionFiles
 
         var guidePath = Path.Combine(dir, GuideFileName);
         var cmdPath = Path.Combine(dir, RestoreCmdFileName);
+        var configPath = Path.Combine(dir, CaptureConfigFileName);
+        File.WriteAllText(configPath, BuildCaptureConfigIni(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
         var guide = $"""
             WinCustoms — C: Windows 복구 백업
@@ -44,6 +47,7 @@ public static class SystemImageCompanionFiles
 
             【백업】 WinCustoms에서 「C: 백업 시작」
             → 다시 시작 후 WinRE에서 오프라인으로 .wim 을 만듭니다.
+            → pagefile·hiberfil·Temp 등 불필요 영역은 자동 제외됩니다.
             → USB/외장은 연결한 채로 두세요.
 
             【복원】 WinCustoms에서 「C: 자동 복원」
@@ -214,11 +218,83 @@ public static class SystemImageCompanionFiles
     }
 
     /// <summary>
+    /// DISM /Capture-Image 용 제외 목록.
+    /// 사용자 ConfigFile 을 쓰면 기본 제외가 덮어써지므로, MS 기본 항목을 반드시 포함한다.
+    /// </summary>
+    public static string BuildCaptureConfigIni() =>
+        """
+        [ExclusionList]
+        \$ntfs.log
+        \hiberfil.sys
+        \pagefile.sys
+        \swapfile.sys
+        \System Volume Information
+        \RECYCLER
+        \$RECYCLE.BIN
+        \Windows\CSC
+        \Windows\Temp
+        \Windows\Temp\*
+        \Temp
+        \Temp\*
+        \Windows\SoftwareDistribution\Download
+        \Windows\SoftwareDistribution\Download\*
+        \Windows\Prefetch
+        \Windows\Prefetch\*
+        \Windows\Logs
+        \Windows\Logs\*
+        \Windows\Panther
+        \Windows\Panther\*
+        \Windows\MEMORY.DMP
+        \Windows\minidump
+        \Windows\minidump\*
+        \Users\*\AppData\Local\Temp
+        \Users\*\AppData\Local\Temp\*
+        \Users\*\AppData\Local\Microsoft\Windows\INetCache
+        \Users\*\AppData\Local\Microsoft\Windows\INetCache\*
+        \Users\*\AppData\Local\CrashDumps
+        \Users\*\AppData\Local\CrashDumps\*
+        \Users\*\AppData\Local\Microsoft\Windows\Caches
+        \Users\*\AppData\Local\Microsoft\Windows\Caches\*
+
+        [CompressionExclusionList]
+        *.mp3
+        *.zip
+        *.cab
+        \WINDOWS\inf\*.pnf
+        """.Replace("\r\n", "\n").Trim() + "\n";
+
+    private static string BuildWriteCaptureConfigBatch()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(":WriteCaptureConfig");
+        sb.AppendLine("rem %1 = output ini path");
+        sb.AppendLine("(");
+        foreach (var raw in BuildCaptureConfigIni().Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0) continue;
+            var escaped = line
+                .Replace("^", "^^", StringComparison.Ordinal)
+                .Replace("&", "^&", StringComparison.Ordinal)
+                .Replace("|", "^|", StringComparison.Ordinal)
+                .Replace("<", "^<", StringComparison.Ordinal)
+                .Replace(">", "^>", StringComparison.Ordinal);
+            sb.Append("  echo ").Append(escaped).AppendLine();
+        }
+
+        sb.AppendLine(") > \"%~1\"");
+        sb.AppendLine("exit /b 0");
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// WinRE 부트 래퍼.
     /// 플래그: 드라이브 루트 + WIM 옆(하위 폴더 dir /s). USB 대기 후 캡처/복원.
     /// </summary>
     public static string BuildWinReBootstrapScript()
-        => """
+    {
+        var writeConfig = BuildWriteCaptureConfigBatch();
+        return $"""
             @echo off
             setlocal EnableExtensions EnableDelayedExpansion
             title WinCustoms
@@ -294,15 +370,23 @@ public static class SystemImageCompanionFiles
             set "SCRATCH=!CAPDRIVE!\WinCustoms-DismScratch"
             if not exist "!SCRATCH!" mkdir "!SCRATCH!" >nul 2>&1
 
+            set "WIMCFG=!CAPDRIVE!\{CaptureConfigFileName}"
+            call :WriteCaptureConfig "!WIMCFG!"
+            if not exist "!WIMCFG!" (
+              echo ERROR: Could not write capture exclusion list: !WIMCFG!
+              goto :capfail
+            )
+
             echo Source : !WINVOL!\
             echo Output : !WIMFILE!
             echo Name   : !IMGNAME!
+            echo Config : !WIMCFG! ^(pagefile/temp excluded^)
             echo.
             echo Capturing... Do not power off.
             echo.
 
             if exist "!WIMFILE!" del /f /q "!WIMFILE!" >nul 2>&1
-            dism.exe /Capture-Image /ImageFile:"!WIMFILE!" /CaptureDir:!WINVOL!\ /Name:"!IMGNAME!" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"!SCRATCH!"
+            dism.exe /Capture-Image /ImageFile:"!WIMFILE!" /CaptureDir:!WINVOL!\ /Name:"!IMGNAME!" /Description:"WinCustoms offline backup" /Compress:fast /NoRpFix /ScratchDir:"!SCRATCH!" /ConfigFile:"!WIMCFG!"
             if errorlevel 1 (
               echo DISM capture failed. errorlevel=!errorlevel!
               goto :capfail
@@ -389,10 +473,14 @@ public static class SystemImageCompanionFiles
 
             :hold
             echo.
-            "%SYSTEMROOT%\System32\cmd.exe" /k "echo WinCustoms paused in WinRE. Type exit when finished."
+            echo Window stays open. Close it, then Continue / Restart.
+            echo.
+            cmd /k
             exit /b 1
 
             rem ===== helpers =====
+
+            {writeConfig}
 
             :SearchFlag
             rem %1=flag file name  %2=CAP or RES
@@ -528,4 +616,5 @@ public static class SystemImageCompanionFiles
             )
             exit /b 0
             """;
+    }
 }

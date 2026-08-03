@@ -28,7 +28,7 @@
                     <StackPanel Spacing="12">
                         <TextBlock Text="1. C: 백업 만들기" Style="{StaticResource SubtitleTextBlockStyle}" />
                         <TextBlock Style="{StaticResource DescriptionTextStyle}"
-                                   Text="다시 시작 후 WinRE에서 C:를 오프라인으로 .wim 에 담습니다. USB/외장에 저장하세요. VSS·파일 제외·임시 복사가 필요 없습니다." />
+                                   Text="다시 시작 후 WinRE에서 C:를 오프라인으로 .wim 에 담습니다. pagefile·최대 절전·Temp·업데이트 캐시 등은 자동 제외됩니다. USB/외장에 저장하세요." />
 
                         <TextBox Header="이미지 이름"
                                  Text="{x:Bind ViewModel.ImageName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
