@@ -152,6 +152,14 @@
                         <FontIcon Glyph="&#xE958;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+
+                <NavigationViewItem Content="부팅 USB"
+                                    Tag="bootusb"
+                                    ToolTipService.ToolTip="USB/외장 디스크에 Windows 설치용 부팅 미디어를 만듭니다 (Rufus 스타일).">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE88E;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <NavigationView.FooterMenuItems>

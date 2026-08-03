@@ -21,6 +21,7 @@ internal static class ServiceConfiguration
         services.AddSingleton<IWingetService, WingetService>();
         services.AddSingleton<ISystemImageService, SystemImageService>();
         services.AddSingleton<ICustomIsoService, CustomIsoService>();
+        services.AddSingleton<IBootUsbService, BootUsbService>();
         services.AddSingleton<IContextMenuService, ContextMenuService>();
         services.AddSingleton<IShellMenuInventoryService, ShellMenuInventoryService>();
         services.AddSingleton<IBrowserRedirectService, BrowserRedirectService>();
@@ -42,6 +43,7 @@ internal static class ServiceConfiguration
         services.AddSingleton<WingetViewModel>();
         services.AddSingleton<SystemBackupViewModel>();
         services.AddSingleton<CustomIsoViewModel>();
+        services.AddSingleton<BootUsbViewModel>();
         services.AddSingleton<SettingsViewModel>();
 
         services.AddSingleton<TweakPageViewModelLocator>();

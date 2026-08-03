@@ -27,12 +27,22 @@ public static class Program
         if (CustomIsoJobHost.IsJobInvocation(args))
             return CustomIsoJobHost.Run(args);
 
+        if (BootUsbJobHost.IsJobInvocation(args))
+            return BootUsbJobHost.Run(args);
+
         // UI 는 한 프로세스만. 이미 떠 있으면 기존 창을 앞으로 가져오고 종료.
         if (!SingleInstance.TryAcquire())
         {
             SingleInstance.ActivateExistingWindow();
             return 0;
         }
+
+        // 이전에 실패/강제종료로 남은 ISO 추출본 정리 (C: 용량)
+        try { WinCustomsWorkCleanup.PurgeStaleWorkFolders(); } catch { /* */ }
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try { WinCustomsWorkCleanup.PurgeStaleWorkFolders(); } catch { /* */ }
+        };
 
         // fail-fast 로 사라지기 전에 예외를 파일에 남긴다.
         CrashLog.BeginStartupCapture();

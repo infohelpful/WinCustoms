@@ -124,6 +124,7 @@ public sealed partial class MainWindow : Window
             NavigationTags.Winget => typeof(WingetPage),
             NavigationTags.SystemBackup => typeof(SystemBackupPage),
             NavigationTags.CustomIso => typeof(CustomIsoPage),
+            NavigationTags.BootUsb => typeof(BootUsbPage),
             NavigationTags.Settings => typeof(SettingsPage),
             _ => null
         };

@@ -72,31 +72,52 @@ public static class CustomIsoJobHost
         {
             // ignore
         }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(request?.WorkDirectory))
+                WinCustomsWorkCleanup.TryDeleteTree(request.WorkDirectory);
+        }
 
         return result.Success ? 0 : 1;
     }
 
     private static void Build(CustomIsoJobRequest request)
     {
-        ThrowIfCancelled(request);
-
-        if (!File.Exists(request.SourceIsoPath))
-            throw new FileNotFoundException("순정 ISO를 찾을 수 없습니다.", request.SourceIsoPath);
-
         var oscdimg = FindOscdimg()
                       ?? throw new InvalidOperationException(
                           "oscdimg.exe 를 찾을 수 없습니다. 배포본 Tools\\oscdimg\\oscdimg.exe 가 포함돼 있는지 확인하세요.\n"
                           + "https://learn.microsoft.com/windows-hardware/get-started/adk-install");
 
-        // 긴 DISM 작업 전에 마지막 단계(oscdimg 부팅파일 스테이징)가 되는지 먼저 확인.
         Progress(request, 2, "ISO 포장 경로 사전 검사...");
         PreflightOscdimgStaging();
+
+        var extractDir = PrepareCustomizedMedia(request);
+
+        ThrowIfCancelled(request);
+        Progress(request, 90, "커스텀 ISO 생성 중 (oscdimg)...");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(request.OutputIsoPath))!);
+        if (File.Exists(request.OutputIsoPath))
+            File.Delete(request.OutputIsoPath);
+
+        BuildIso(oscdimg, extractDir, request.OutputIsoPath, request);
+        Progress(request, 98, "ISO 생성 완료");
+    }
+
+    /// <summary>
+    /// 순정 ISO 추출 + 트윅/디블로트/OOBE 적용까지. (oscdimg 포장 제외)
+    /// 부팅 USB 작성 등에서 재사용한다. 반환: 추출된 ISO 루트 폴더.
+    /// </summary>
+    public static string PrepareCustomizedMedia(CustomIsoJobRequest request)
+    {
+        ThrowIfCancelled(request);
+
+        if (!File.Exists(request.SourceIsoPath))
+            throw new FileNotFoundException("순정 ISO를 찾을 수 없습니다.", request.SourceIsoPath);
 
         var work = string.IsNullOrWhiteSpace(request.WorkDirectory)
             ? CreateNoSpaceWorkDirectory()
             : request.WorkDirectory;
 
-        // 작업 경로에 공백이 있으면 oscdimg -bootdata 외에 다른 이슈도 나기 쉬워, 가능하면 재배치.
         if (work.Contains(' ', StringComparison.Ordinal))
         {
             var relocated = CreateNoSpaceWorkDirectory();
@@ -124,7 +145,14 @@ public static class CustomIsoJobHost
 
             var wimPath = installMedia;
             var mountIndex = request.ImageIndex;
-            if (installMedia.EndsWith(".esd", StringComparison.OrdinalIgnoreCase))
+            var needsMount = request.RegistryOperations.Count > 0
+                             || request.AppxPackageNames.Count > 0
+                             || request.InjectHostDrivers
+                             || request.BypassSetupRequirements
+                             || CustomIsoUnattend.NeedsUnattend(request);
+
+            // 커스터마이즈할 때만 ESD→WIM. 순정 구울 때는 install.esd 그대로 두어 전체 에디션 유지.
+            if (needsMount && installMedia.EndsWith(".esd", StringComparison.OrdinalIgnoreCase))
             {
                 Progress(request, 25, "ESD → WIM 변환 중...");
                 wimPath = Path.Combine(extractDir, "sources", "install.wim");
@@ -133,66 +161,73 @@ public static class CustomIsoJobHost
                 mountIndex = 1;
             }
 
-            // ISO에서 복사된 WIM 은 읽기 전용인 경우가 많고, 그대로면 DISM 0xc1510111 이 난다.
             ClearReadOnlyAttribute(wimPath);
             ClearReadOnlyAttribute(Path.Combine(extractDir, "sources", "boot.wim"));
 
-            ThrowIfCancelled(request);
-            Progress(request, 35,
-                $"install.wim 마운트 (index {mountIndex})… 용량에 따라 수 분~십수 분 걸릴 수 있습니다");
-            RunDism([
-                "/Mount-Image",
-                $"/ImageFile:{wimPath}",
-                $"/Index:{mountIndex}",
-                $"/MountDir:{mountDir}"
-            ], request, mapFrom: 35, mapTo: 48);
-            mounted = true;
-
-            ThrowIfCancelled(request);
-            if (request.RegistryOperations.Count > 0)
-            {
-                Progress(request, 50, $"오프라인 레지스트리 적용 ({request.RegistryOperations.Count}건)...");
-                OfflineRegistryApplier.Apply(mountDir, request.RegistryOperations, m => Progress(request, null, m));
-            }
-
-            ThrowIfCancelled(request);
-            if (request.AppxPackageNames.Count > 0)
-            {
-                Progress(request, 60, "프로비저닝 앱 제거 중...");
-                RemoveProvisionedApps(mountDir, request.AppxPackageNames, request);
-            }
-
             string? driversDir = null;
-            if (request.InjectHostDrivers)
+
+            if (needsMount)
             {
                 ThrowIfCancelled(request);
-                driversDir = Path.Combine(work, "drivers");
-                Progress(request, 66, "현재 PC 드라이버 내보내기...");
-                ExportOnlineDrivers(driversDir, request);
-                Progress(request, 70, "install.wim에 드라이버 주입...");
-                AddDriversToImage(mountDir, driversDir, request);
-            }
+                Progress(request, 35,
+                    $"install.wim 마운트 (index {mountIndex})… 용량에 따라 수 분~십수 분 걸릴 수 있습니다");
+                RunDism([
+                    "/Mount-Image",
+                    $"/ImageFile:{wimPath}",
+                    $"/Index:{mountIndex}",
+                    $"/MountDir:{mountDir}"
+                ], request, mapFrom: 35, mapTo: 48);
+                mounted = true;
 
-            if (request.BypassSetupRequirements)
-            {
                 ThrowIfCancelled(request);
-                Progress(request, 74, "install.wim 설치 검사 완화(MoSetup)...");
-                ApplyInstallImageBypass(mountDir, request);
-            }
+                if (request.RegistryOperations.Count > 0)
+                {
+                    Progress(request, 50, $"오프라인 레지스트리 적용 ({request.RegistryOperations.Count}건)...");
+                    OfflineRegistryApplier.Apply(mountDir, request.RegistryOperations, m => Progress(request, null, m));
+                }
 
-            if (CustomIsoUnattend.NeedsUnattend(request))
-            {
                 ThrowIfCancelled(request);
-                Progress(request, 76, "OOBE 간편 설치(레지스트리) 적용...");
-                var oobeOps = CustomIsoUnattend.BuildOfflineRegistryOps(request);
-                if (oobeOps.Count > 0)
-                    OfflineRegistryApplier.Apply(mountDir, oobeOps, m => Progress(request, null, m));
-            }
+                if (request.AppxPackageNames.Count > 0)
+                {
+                    Progress(request, 60, "프로비저닝 앱 제거 중...");
+                    RemoveProvisionedApps(mountDir, request.AppxPackageNames, request);
+                }
 
-            ThrowIfCancelled(request);
-            Progress(request, 78, "install.wim 저장(언마운트)...");
-            RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
-            mounted = false;
+                if (request.InjectHostDrivers)
+                {
+                    ThrowIfCancelled(request);
+                    driversDir = Path.Combine(work, "drivers");
+                    Progress(request, 66, "현재 PC 드라이버 내보내기...");
+                    ExportOnlineDrivers(driversDir, request);
+                    Progress(request, 70, "install.wim에 드라이버 주입...");
+                    AddDriversToImage(mountDir, driversDir, request);
+                }
+
+                if (request.BypassSetupRequirements)
+                {
+                    ThrowIfCancelled(request);
+                    Progress(request, 74, "install.wim 설치 검사 완화(MoSetup)...");
+                    ApplyInstallImageBypass(mountDir, request);
+                }
+
+                if (CustomIsoUnattend.NeedsUnattend(request))
+                {
+                    ThrowIfCancelled(request);
+                    Progress(request, 76, "OOBE 간편 설치(레지스트리) 적용...");
+                    var oobeOps = CustomIsoUnattend.BuildOfflineRegistryOps(request);
+                    if (oobeOps.Count > 0)
+                        OfflineRegistryApplier.Apply(mountDir, oobeOps, m => Progress(request, null, m));
+                }
+
+                ThrowIfCancelled(request);
+                Progress(request, 78, "install.wim 저장(언마운트)...");
+                RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
+                mounted = false;
+            }
+            else
+            {
+                Progress(request, 50, "이미지 커스터마이즈 없음 — 추출본 그대로 사용");
+            }
 
             if (request.BypassSetupRequirements || request.InjectHostDrivers)
             {
@@ -213,14 +248,8 @@ public static class CustomIsoJobHost
                 CustomIsoUnattend.WriteAutounattendXml(extractDir, request);
             }
 
-            ThrowIfCancelled(request);
-            Progress(request, 90, "커스텀 ISO 생성 중 (oscdimg)...");
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(request.OutputIsoPath))!);
-            if (File.Exists(request.OutputIsoPath))
-                File.Delete(request.OutputIsoPath);
-
-            BuildIso(oscdimg, extractDir, request.OutputIsoPath, request);
-            Progress(request, 98, "ISO 생성 완료");
+            Progress(request, 89, "설치 미디어 준비 완료");
+            return extractDir;
         }
         finally
         {
@@ -529,18 +558,10 @@ public static class CustomIsoJobHost
         || ex.Message.Contains("denied", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("거부", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>C:\ProgramData\WinCustoms\… — 공백 없고 관리자 쓰기에 안정적.</summary>
-    private static string GetWinCustomsDataRoot() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "WinCustoms");
-
     private static string CreateNoSpaceWorkDirectory()
-    {
-        var dir = Path.Combine(GetWinCustomsDataRoot(), "IsoBuild", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
+        => WinCustomsWorkCleanup.CreateJobWorkDirectory("IsoBuild");
+
+    private static string GetWinCustomsDataRoot() => WinCustomsWorkCleanup.ProgramDataRoot;
 
     private static string PrepareOscdimgStagingDir(bool wipe = false)
     {

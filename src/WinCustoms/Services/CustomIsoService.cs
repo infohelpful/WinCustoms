@@ -43,7 +43,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
 
         // DISM /Get-ImageInfo 는 관리자 권한이 필요하다(비승격 시 740).
         // install.wim 전체를 복사하지 않고, ISO를 잠깐 마운트한 뒤 그 경로로 조회한다.
-        var work = Path.Combine(Path.GetTempPath(), "WinCustoms", "iso-probe-" + Guid.NewGuid().ToString("N"));
+        var work = Path.Combine(WinCustomsWorkCleanup.TempRoot, "iso-probe-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         var infoFile = Path.Combine(work, "imageinfo.txt");
 
@@ -188,27 +188,31 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
             .SelectMany(t => t.OfflineApplyOperations!)
             .ToList();
 
-        var work = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "WinCustoms", "IsoBuild", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(work);
+        var work = WinCustomsWorkCleanup.CreateJobWorkDirectory("IsoBuild");
 
-        var request = new CustomIsoJobRequest
+        try
         {
-            SourceIsoPath = Path.GetFullPath(sourceIso),
-            OutputIsoPath = Path.GetFullPath(outputIso),
-            ImageIndex = imageIndex <= 0 ? 1 : imageIndex,
-            WorkDirectory = work,
-            RegistryOperations = ops,
-            AppxPackageNames = appxPackageNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            BypassSetupRequirements = bypassSetupRequirements,
-            InjectHostDrivers = injectHostDrivers,
-            SkipOnlineAccount = skipOnlineAccount,
-            SkipPrivacyExperience = skipPrivacyExperience,
-            LocalAccountName = (localAccountName ?? string.Empty).Trim()
-        };
+            var request = new CustomIsoJobRequest
+            {
+                SourceIsoPath = Path.GetFullPath(sourceIso),
+                OutputIsoPath = Path.GetFullPath(outputIso),
+                ImageIndex = imageIndex <= 0 ? 1 : imageIndex,
+                WorkDirectory = work,
+                RegistryOperations = ops,
+                AppxPackageNames = appxPackageNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                BypassSetupRequirements = bypassSetupRequirements,
+                InjectHostDrivers = injectHostDrivers,
+                SkipOnlineAccount = skipOnlineAccount,
+                SkipPrivacyExperience = skipPrivacyExperience,
+                LocalAccountName = (localAccountName ?? string.Empty).Trim()
+            };
 
-        return await RunElevatedAsync(request, progress, ct).ConfigureAwait(false);
+            return await RunElevatedAsync(request, progress, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            WinCustomsWorkCleanup.TryDeleteTree(work);
+        }
     }
 
     private async Task<CustomIsoBuildResult> RunElevatedAsync(

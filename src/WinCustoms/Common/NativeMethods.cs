@@ -31,6 +31,10 @@ internal static partial class NativeMethods
     [LibraryImport("shlwapi.dll", EntryPoint = "SHLoadIndirectString", StringMarshalling = StringMarshalling.Utf16)]
     private static unsafe partial int SHLoadIndirectString(string source, char* buffer, int bufferLength, nint reserved);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "SetVolumeLabelW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetVolumeLabel(string lpRootPathName, string? lpVolumeName);
+
     /// <summary>
     /// <c>@shell32.dll,-8506</c> 형태의 간접 문자열을 실제 표시 문자열로 바꾼다.
     /// 셸 동사의 MUIVerb 는 대부분 이 형식이라 원문 그대로 쓰면 리소스 참조가 화면에 노출된다.
