@@ -324,8 +324,13 @@ Step 'Native AOT 게시 (몇 분 걸릴 수 있습니다)'
 
 Clear-PublishDirectory
 
-& dotnet publish $Project -c Release -r win-x64 -o $PublishDir --nologo
-if ($LASTEXITCODE -ne 0) { Fail '게시에 실패했습니다. 위 빌드 로그를 확인하세요.' }
+. (Join-Path $PSScriptRoot 'Publish-Aot.ps1')
+try {
+    Invoke-WinCustomsAotPublish -Project $Project -PublishDir $PublishDir
+}
+catch {
+    Fail $_.Exception.Message
+}
 
 # ── 5. 필수 파일 검증 ─────────────────────────────────────────
 # XBF 와 PRI 는 게시 목록에서 조용히 빠지기 쉬운 파일이다.
