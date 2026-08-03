@@ -1,24 +1,31 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 
 namespace WinCustoms.Common;
 
 /// <summary>
-/// DISM / powercfg / reg / PowerShell 등 콘솔 도구 출력은
-/// 한국어 Windows 에서 보통 CP949(OEM/ANSI)다. UTF-8 로 읽으면 한글이 깨진다.
-/// (.NET 에서 Encoding.Default 는 UTF-8 이므로 OEM 코드 페이지를 명시해야 한다.)
+/// 콘솔 도구 출력 디코딩.
+/// DISM/reg 등은 보통 CP949(OEM), winget 등 최신 도구는 UTF-8 인 경우가 많다.
+/// UTF-8 로만 읽거나 CP949 로만 읽으면 한글이 깨지므로 자동 판별한다.
 /// </summary>
 internal static class ConsoleEncoding
 {
-    private static readonly Lazy<Encoding> Cached = new(Resolve);
+    private static readonly Lazy<Encoding> CachedOem = new(ResolveOem);
+    private static readonly UTF8Encoding Utf8Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly UTF8Encoding Utf8Lenient = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+    private static readonly Encoding Latin1 = Encoding.Latin1; // 바이트 보존용 (0–255)
     private static int _registered;
 
-    public static Encoding OemOrAnsi => Cached.Value;
+    public static Encoding OemOrAnsi => CachedOem.Value;
+
+    /// <summary>StreamReader 가 바이트를 잃지 않게 Latin-1 로 받고, <see cref="DecodeAuto"/> 로 다시 디코딩할 때 쓴다.</summary>
+    public static Encoding Passthrough => Latin1;
 
     public static void EnsureRegistered()
     {
-        if (System.Threading.Interlocked.Exchange(ref _registered, 1) == 1) return;
+        if (Interlocked.Exchange(ref _registered, 1) == 1) return;
         try
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -28,11 +35,19 @@ internal static class ConsoleEncoding
             // ignore
         }
 
-        // AOT 트리밍이 코드 페이지 구현을 걷어내지 않도록 한 번 참조한다.
         _ = OemOrAnsi;
     }
 
     public static void ApplyTo(ProcessStartInfo psi)
+    {
+        EnsureRegistered();
+        // 원시 바이트 보존 → DecodeAuto. (UTF-8/CP949 자동)
+        psi.StandardOutputEncoding = Passthrough;
+        psi.StandardErrorEncoding = Passthrough;
+    }
+
+    /// <summary>레거시 도구만 OEM 고정이 필요할 때.</summary>
+    public static void ApplyOemTo(ProcessStartInfo psi)
     {
         EnsureRegistered();
         var enc = OemOrAnsi;
@@ -40,7 +55,48 @@ internal static class ConsoleEncoding
         psi.StandardErrorEncoding = enc;
     }
 
-    private static Encoding Resolve()
+    public static string DecodeAuto(string? latin1Preserved)
+    {
+        if (string.IsNullOrEmpty(latin1Preserved)) return string.Empty;
+        return DecodeAuto(Latin1.GetBytes(latin1Preserved));
+    }
+
+    public static string DecodeAuto(byte[] data)
+    {
+        if (data.Length == 0) return string.Empty;
+        EnsureRegistered();
+
+        var offset = 0;
+        if (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+            offset = 3;
+
+        // 1) 유효한 UTF-8 이면 우선 (winget, 최신 CLI)
+        try
+        {
+            var utf8 = Utf8Strict.GetString(data, offset, data.Length - offset);
+            if (!utf8.Contains('\uFFFD'))
+                return NormalizeNewlines(utf8);
+        }
+        catch (DecoderFallbackException)
+        {
+            // CP949 등
+        }
+
+        // 2) OEM/ANSI (DISM, reg, 구형 도구)
+        try
+        {
+            return NormalizeNewlines(OemOrAnsi.GetString(data, offset, data.Length - offset));
+        }
+        catch
+        {
+            return NormalizeNewlines(Utf8Lenient.GetString(data, offset, data.Length - offset));
+        }
+    }
+
+    private static string NormalizeNewlines(string s)
+        => s.Replace("\0", string.Empty, StringComparison.Ordinal);
+
+    private static Encoding ResolveOem()
     {
         try
         {
@@ -63,8 +119,7 @@ internal static class ConsoleEncoding
             }
         }
 
-        // 최후: UTF-8 (깨질 수 있음) — GetEncoding 이 전부 실패한 경우만.
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        return Utf8Lenient;
     }
 
     private static IEnumerable<int> CandidateCodePages()
@@ -73,7 +128,6 @@ internal static class ConsoleEncoding
         try { oem = CultureInfo.CurrentCulture.TextInfo.OEMCodePage; } catch { /* */ }
         try { ansi = CultureInfo.CurrentCulture.TextInfo.ANSICodePage; } catch { /* */ }
 
-        // 한국어 Windows 콘솔 도구는 보통 OEM(949) 로 출력한다.
         if (oem > 0) yield return oem;
         if (ansi > 0 && ansi != oem) yield return ansi;
         yield return 949;

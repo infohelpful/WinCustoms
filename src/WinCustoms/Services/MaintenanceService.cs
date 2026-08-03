@@ -117,16 +117,15 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = ConsoleEncoding.OemOrAnsi,
-            StandardErrorEncoding = ConsoleEncoding.OemOrAnsi
+            RedirectStandardError = true
         };
+        ConsoleEncoding.ApplyTo(psi);
         foreach (var a in args)
             psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("powercfg 실행 실패");
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
+        var stdout = ConsoleEncoding.DecodeAuto(p.StandardOutput.ReadToEnd());
+        var stderr = ConsoleEncoding.DecodeAuto(p.StandardError.ReadToEnd());
         p.WaitForExit(30_000);
         return string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
     }

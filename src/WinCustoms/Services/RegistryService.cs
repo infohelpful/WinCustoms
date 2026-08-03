@@ -186,7 +186,7 @@ public sealed class RegistryService(IElevationService elevation) : IRegistryServ
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-                ConsoleEncoding.ApplyTo(psi);
+                ConsoleEncoding.ApplyOemTo(psi);
                 psi.ArgumentList.Add("export");
                 psi.ArgumentList.Add(fullPath);
                 psi.ArgumentList.Add(temp);

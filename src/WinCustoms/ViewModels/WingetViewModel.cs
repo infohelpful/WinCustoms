@@ -200,7 +200,7 @@ public sealed partial class WingetViewModel : ObservableObject
         {
             _searchResults.Clear();
             ApplyVisibleList();
-            StatusMessage = $"검색 실패: {ex.Message}";
+            StatusMessage = $"검색 실패: {SanitizeWingetError(ex.Message)}";
         }
         finally
         {
@@ -374,6 +374,29 @@ public sealed partial class WingetViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private static string SanitizeWingetError(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return "알 수 없는 오류";
+
+        // 흔한 winget 소스 오류는 한글 안내로 치환
+        if (message.Contains("0x800f024b", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("hash for the file is not present", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("source reset", StringComparison.OrdinalIgnoreCase))
+        {
+            return "winget 소스에 문제가 있습니다. 관리자 터미널에서 "
+                   + "`winget source reset --force` 후 다시 검색하세요.";
+        }
+
+        // 제어 문자·깨진 대체문자 정리
+        var cleaned = new string(message
+            .Where(ch => !char.IsControl(ch) || ch is '\r' or '\n' or '\t')
+            .ToArray())
+            .Replace('\uFFFD', ' ')
+            .Trim();
+
+        return string.IsNullOrWhiteSpace(cleaned) ? "알 수 없는 오류" : cleaned;
     }
 
     [RelayCommand]

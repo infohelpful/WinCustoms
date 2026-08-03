@@ -159,7 +159,7 @@ public static class SystemImageJobHost
             RedirectStandardError = !captureMode
         };
         if (!captureMode)
-            ConsoleEncoding.ApplyTo(psi);
+            ConsoleEncoding.ApplyOemTo(psi);
 
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
@@ -515,7 +515,7 @@ public static class SystemImageJobHost
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            ConsoleEncoding.ApplyTo(psi);
+            ConsoleEncoding.ApplyOemTo(psi);
             psi.ArgumentList.Add(windowsDir);
             psi.ArgumentList.Add("/f");
             psi.ArgumentList.Add("UEFI");
@@ -590,8 +590,8 @@ public static class SystemImageJobHost
             throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());
+        var stderr = ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult());
 
         if (process.ExitCode != 0)
         {

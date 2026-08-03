@@ -194,7 +194,7 @@ public static class OfflineRegistryApplier
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        ConsoleEncoding.ApplyTo(psi);
+        ConsoleEncoding.ApplyOemTo(psi);
         foreach (var a in args)
             psi.ArgumentList.Add(a);
 

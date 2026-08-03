@@ -252,8 +252,8 @@ public static class SystemImageAutoRestore
 
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException($"{fileName} 을(를) 시작할 수 없습니다.");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        var stdout = ConsoleEncoding.DecodeAuto(process.StandardOutput.ReadToEnd());
+        var stderr = ConsoleEncoding.DecodeAuto(process.StandardError.ReadToEnd());
         process.WaitForExit(300_000);
 
         if (!ignoreExitCode && process.ExitCode != 0)

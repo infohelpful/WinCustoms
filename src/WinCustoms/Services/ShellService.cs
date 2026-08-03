@@ -101,7 +101,9 @@ public sealed class ShellService : IShellService
 
         await process.WaitForExitAsync(ct).ConfigureAwait(false);
 
-        return new ProcessResult(process.ExitCode, await stdoutTask.ConfigureAwait(false), await stderrTask.ConfigureAwait(false));
+        var stdout = ConsoleEncoding.DecodeAuto(await stdoutTask.ConfigureAwait(false));
+        var stderr = ConsoleEncoding.DecodeAuto(await stderrTask.ConfigureAwait(false));
+        return new ProcessResult(process.ExitCode, stdout, stderr);
     }
 
     public Task<ProcessResult> RunPowerShellAsync(string script, CancellationToken ct = default)

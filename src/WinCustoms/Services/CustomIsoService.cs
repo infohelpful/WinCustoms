@@ -163,8 +163,8 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct).ConfigureAwait(false);
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
+        var stdout = ConsoleEncoding.DecodeAuto(await stdoutTask.ConfigureAwait(false));
+        var stderr = ConsoleEncoding.DecodeAuto(await stderrTask.ConfigureAwait(false));
         if (p.ExitCode != 0)
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
     }

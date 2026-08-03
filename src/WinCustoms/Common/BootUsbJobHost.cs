@@ -563,8 +563,8 @@ public static class BootUsbJobHost
             else Thread.Sleep(200);
         }
 
-        output.Append(p.StandardOutput.ReadToEnd());
-        output.Append(p.StandardError.ReadToEnd());
+        output.Append(ConsoleEncoding.DecodeAuto(p.StandardOutput.ReadToEnd()));
+        output.Append(ConsoleEncoding.DecodeAuto(p.StandardError.ReadToEnd()));
         if (p.ExitCode >= 8)
             throw new InvalidOperationException(
                 $"파일 복사 실패({label}) 코드 {p.ExitCode}\n" + TrimLog(output.ToString()));
@@ -683,8 +683,8 @@ public static class BootUsbJobHost
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException(file + " 실행 실패");
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
+        var stdout = ConsoleEncoding.DecodeAuto(p.StandardOutput.ReadToEnd());
+        var stderr = ConsoleEncoding.DecodeAuto(p.StandardError.ReadToEnd());
         p.WaitForExit();
         if (!ignoreExit && p.ExitCode != 0)
             throw new InvalidOperationException(
@@ -719,8 +719,8 @@ public static class BootUsbJobHost
             throw new TimeoutException("디스크 작업이 시간 초과되었습니다.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult() ?? string.Empty;
-        var stderr = stderrTask.GetAwaiter().GetResult() ?? string.Empty;
+        var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult() ?? string.Empty);
+        var stderr = ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult() ?? string.Empty);
         if (p.ExitCode != 0)
         {
             var errLine = stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

@@ -726,7 +726,7 @@ public static class CustomIsoJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        ConsoleEncoding.ApplyTo(psi);
+        ConsoleEncoding.ApplyOemTo(psi);
         psi.ArgumentList.Add("/Get-ImageInfo");
         psi.ArgumentList.Add("/ImageFile:" + imageFile);
 
@@ -833,7 +833,7 @@ public static class CustomIsoJobHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        ConsoleEncoding.ApplyTo(psi);
+        ConsoleEncoding.ApplyOemTo(psi);
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException(file + " 실행 실패");
@@ -985,8 +985,8 @@ public static class CustomIsoJobHost
             throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());
+        var stderr = ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult());
 
         if (p.ExitCode != 0)
         {

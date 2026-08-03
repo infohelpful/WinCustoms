@@ -232,8 +232,8 @@ public static class ElevatedJobHost
                 $"{Path.GetFileName(cmd.FileName)} 이(가) {timeoutMs / 1000}초 안에 끝나지 않아 중단했습니다.");
         }
 
-        var stdout = stdoutTask.GetAwaiter().GetResult();
-        var stderr = stderrTask.GetAwaiter().GetResult();
+        var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());
+        var stderr = ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult());
 
         if (!cmd.IgnoreExitCode && process.ExitCode != 0)
         {
