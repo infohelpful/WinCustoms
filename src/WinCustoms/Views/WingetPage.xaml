@@ -66,7 +66,6 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <TextBox x:Name="SearchBox"
@@ -81,12 +80,6 @@
                     Content="검색"
                     Style="{StaticResource AccentButtonStyle}"
                     Command="{x:Bind ViewModel.SearchCommand}" />
-
-            <CheckBox Grid.Column="2"
-                      Content="설치된 항목 숨기기"
-                      MinWidth="0"
-                      VerticalAlignment="Center"
-                      IsChecked="{x:Bind ViewModel.HideInstalled, Mode=TwoWay}" />
         </Grid>
 
         <Grid Grid.Row="2">
@@ -145,22 +138,45 @@
                                               IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
                                               IsEnabled="{x:Bind views:XamlHelpers.Not(IsInstalled), Mode=OneWay}" />
 
-                                    <StackPanel Grid.Column="1" Spacing="2">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <!-- 이름 · 앱 ID · 버전 · 파일 소스 한 줄 -->
+                                        <StackPanel Orientation="Horizontal" Spacing="16">
                                             <TextBlock Text="{x:Bind DisplayName}"
                                                        Style="{StaticResource BodyStrongTextBlockStyle}"
                                                        VerticalAlignment="Center" />
 
-                                            <Border Style="{StaticResource BadgeBorderStyle}">
-                                                <TextBlock Style="{StaticResource BadgeTextStyle}" Text="{x:Bind Category}" />
-                                            </Border>
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <TextBlock Text="앱 ID"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Text="{x:Bind Id}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           IsTextSelectionEnabled="True" />
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <TextBlock Text="버전"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Text="{x:Bind VersionDisplay}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}" />
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <TextBlock Text="파일 소스"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Text="{x:Bind SourceDisplay}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}" />
+                                            </StackPanel>
 
                                             <Border Style="{StaticResource BadgeBorderStyle}"
+                                                    VerticalAlignment="Center"
                                                     Visibility="{x:Bind views:XamlHelpers.Show(Recommended)}">
                                                 <TextBlock Style="{StaticResource BadgeTextStyle}" Text="추천" />
                                             </Border>
-
                                             <Border Style="{StaticResource BadgeBorderStyle}"
+                                                    VerticalAlignment="Center"
                                                     Visibility="{x:Bind views:XamlHelpers.Show(IsInstalled), Mode=OneWay}">
                                                 <TextBlock Style="{StaticResource BadgeTextStyle}" Text="설치됨" />
                                             </Border>
@@ -169,16 +185,6 @@
                                         <TextBlock Text="{x:Bind Description}"
                                                    Style="{StaticResource DescriptionTextStyle}"
                                                    Visibility="{x:Bind views:XamlHelpers.ShowIfText(Description)}" />
-
-                                        <StackPanel Orientation="Horizontal" Spacing="12">
-                                            <TextBlock Text="{x:Bind Id}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                            <TextBlock Text="{x:Bind Version}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                       Visibility="{x:Bind views:XamlHelpers.ShowIfText(Version)}" />
-                                        </StackPanel>
 
                                         <TextBlock Text="{x:Bind LastError, Mode=OneWay}"
                                                    Style="{StaticResource CaptionTextBlockStyle}"

@@ -88,6 +88,9 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _maintenance.CreateRestorePointAsync($"WinCustoms {DateTime.Now:yyyy-MM-dd HH:mm}", ct);
             GlobalStatus = "복원 지점을 만들었습니다.";
+            await _dialog.ShowMessageAsync(
+                "복원 지점 생성 완료",
+                "시스템 복원 지점을 만들었습니다.\n문제가 생기면 Windows 설정의 '복원'에서 이 지점으로 되돌릴 수 있습니다.");
         }
         catch (ElevationDeniedException)
         {

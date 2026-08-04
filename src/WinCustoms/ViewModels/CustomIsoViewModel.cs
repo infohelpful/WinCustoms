@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -257,6 +258,23 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void OpenWindows11Download()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = BootUsbJobHost.Windows11DownloadUrl,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "다운로드 페이지를 열지 못했습니다: " + ex.Message;
+        }
+    }
+
+    [RelayCommand]
     private async Task BrowseOutputIsoAsync()
     {
         var path = await _dialog.PickSaveIsoAsync($"WinCustoms-Win11-{DateTime.Now:yyyyMMdd}");
@@ -318,6 +336,14 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         foreach (var t in Tweaks)
             t.IsSelected = t.SupportsIso && t.Tweak.Category is
                 TweakCategory.Explorer or TweakCategory.Taskbar or TweakCategory.Privacy or TweakCategory.Performance;
+        RefreshSummaries();
+    }
+
+    [RelayCommand]
+    private void ClearTweaksSelection()
+    {
+        foreach (var t in Tweaks)
+            t.IsSelected = false;
         RefreshSummaries();
     }
 

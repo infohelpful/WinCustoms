@@ -48,8 +48,15 @@ public sealed partial class TweakCatalog
             description: "복원 지점이 없으면 잘못 건드릴 때 되돌리기 어렵습니다. 만들면 문제 생겼을 때 이전 상태로 돌아갈 수 있습니다.",
             category: TweakCategory.PowerTools,
             actionText: "복원 지점 생성",
-            run: ct => _maintenance.CreateRestorePointAsync(
-                $"WinCustoms {DateTime.Now:yyyy-MM-dd HH:mm}", ct),
+            run: async ct =>
+            {
+                await _maintenance.CreateRestorePointAsync(
+                    $"WinCustoms {DateTime.Now:yyyy-MM-dd HH:mm}", ct).ConfigureAwait(true);
+
+                await _dialog.ShowMessageAsync(
+                    "복원 지점 생성 완료",
+                    "시스템 복원 지점을 만들었습니다.\n문제가 생기면 Windows 설정의 '복원'에서 이 지점으로 되돌릴 수 있습니다.");
+            },
             requiresAdmin: true,
             risk: TweakRisk.Safe)
     ];

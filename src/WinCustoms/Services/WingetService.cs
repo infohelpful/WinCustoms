@@ -16,6 +16,29 @@ public sealed partial class WingetPackageInfo : ObservableObject
     /// <summary>winget 소스 이름(winget / msstore). null 이면 설치 시 소스 지정 안 함.</summary>
     public string? Source { get; init; }
 
+    /// <summary>목록에 보여줄 파일 소스 이름 (Winget / Microsoft Store / Chocolatey 등).</summary>
+    public string SourceDisplay
+    {
+        get
+        {
+            var s = (Source ?? string.Empty).Trim();
+            if (s.Length == 0 || s.Equals("winget", StringComparison.OrdinalIgnoreCase))
+                return "Winget";
+            if (s.Equals("msstore", StringComparison.OrdinalIgnoreCase))
+                return "Microsoft Store";
+            if (s.Equals("chocolatey", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("choco", StringComparison.OrdinalIgnoreCase))
+                return "Chocolatey";
+            if (s.Equals("winget-font", StringComparison.OrdinalIgnoreCase))
+                return "Winget Font";
+            return s;
+        }
+    }
+
+    /// <summary>버전이 없을 때 목록용 표시.</summary>
+    public string VersionDisplay
+        => string.IsNullOrWhiteSpace(Version) ? "—" : Version!;
+
     /// <summary>처음 PC 세팅할 때 같이 깔아 두면 좋은 항목.</summary>
     public bool Recommended { get; init; }
 
@@ -228,20 +251,26 @@ public sealed class WingetService(IShellService shell) : IWingetService
                    ?? throw new InvalidOperationException(
                        "winget 을 찾을 수 없습니다. Microsoft Store 에서 '앱 설치 관리자(App Installer)'를 설치하거나 업데이트하세요.");
 
+        if (string.IsNullOrWhiteSpace(package.Id) || !LooksLikePackageId(package.Id))
+            throw new InvalidOperationException("패키지 ID가 올바르지 않습니다: " + package.Id);
+
         var args = new List<string>
         {
             "install",
-            "--id", package.Id,
+            "--id", package.Id.Trim(),
             "--exact",
             "--accept-package-agreements",
             "--accept-source-agreements",
             "--disable-interactivity"
         };
 
-        if (!string.IsNullOrWhiteSpace(package.Source))
+        // 검색 표 파싱이 Match 열(ProductCode: 7-zip)과 Source(winget)를 붙이면
+        // --source "7-zip winget" 이 되어 설치가 실패한다. 유효한 소스만 넘긴다.
+        var source = NormalizeWingetSource(package.Source);
+        if (source is not null)
         {
             args.Add("--source");
-            args.Add(package.Source);
+            args.Add(source);
         }
 
         var result = await _shell.RunAsync(path, args, ct).ConfigureAwait(false);
@@ -330,7 +359,10 @@ public sealed class WingetService(IShellService shell) : IWingetService
         if (headerIndex < 0) return [];
 
         var header = lines[headerIndex];
-        var idStart = FindColumnStart(header, ["Id", "장치 ID", "패키지 ID"]);
+        // "장치 ID" / "패키지 ID" 를 "Id" 보다 먼저 찾아야 한다.
+        // IndexOf("Id") 는 "장치 ID" 의 "ID" 에 걸려 열이 3칸 밀리고,
+        // 이름이 "7-Zip 7" · ID 가 "zip.7zip" 처럼 잘린다.
+        var idStart = FindColumnStart(header, ["장치 ID", "패키지 ID", "Id"]);
         var versionStart = FindColumnStart(header, ["Version", "버전"]);
         var sourceStart = FindColumnStart(header, ["Source", "원본", "소스"]);
         var matchStart = FindColumnStart(header, ["Match", "일치"]);
@@ -357,15 +389,28 @@ public sealed class WingetService(IShellService shell) : IWingetService
             var id = SafeSlice(line, idStart, idEnd).Trim();
             var version = versionStart >= 0 ? SafeSlice(line, versionStart, versionEnd).Trim() : string.Empty;
 
+            // 긴 이름이 열을 침범하면 ID 가 깨진다 → 줄에서 패키지 ID 를 다시 찾는다.
+            if (!LooksLikePackageId(id))
+            {
+                if (!TryExtractPackageId(line, out id, out var nameHint, out var versionHint))
+                    continue;
+                if (string.IsNullOrWhiteSpace(name) || name.EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                    name = nameHint;
+                if (string.IsNullOrWhiteSpace(version))
+                    version = versionHint;
+            }
+
             string? source = null;
             if (sourceStart >= 0)
             {
                 var sourceEnd = matchStart > sourceStart ? matchStart : line.Length;
                 source = SafeSlice(line, sourceStart, sourceEnd).Trim();
-                if (string.IsNullOrWhiteSpace(source)) source = null;
             }
 
-            var match = matchStart >= 0 ? SafeSlice(line, matchStart, line.Length).Trim() : string.Empty;
+            // Match 열이 길면 Source 열과 붙는다(예: "ProductCode: 7-zip winget").
+            // 줄 끝 토큰·알려진 소스명으로 바로잡는다.
+            source = NormalizeWingetSource(source)
+                     ?? NormalizeWingetSource(ExtractTrailingSourceToken(line));
 
             if (string.IsNullOrWhiteSpace(id) || !LooksLikePackageId(id)) continue;
             if (!seen.Add(id)) continue;
@@ -374,7 +419,8 @@ public sealed class WingetService(IShellService shell) : IWingetService
             {
                 Id = id,
                 DisplayName = string.IsNullOrWhiteSpace(name) ? id : name,
-                Description = string.IsNullOrWhiteSpace(match) ? string.Empty : match,
+                // Match 열(ProductCode/Tag/Moniker)은 UI 설명으로 쓰지 않는다.
+                Description = string.Empty,
                 Category = source ?? "검색",
                 Version = string.IsNullOrWhiteSpace(version) ? null : version,
                 Source = source,
@@ -382,7 +428,41 @@ public sealed class WingetService(IShellService shell) : IWingetService
             });
         }
 
+        // 열 파싱이 전부 실패하면 휴리스틱으로 한 번 더.
+        if (results.Count == 0)
+            return ParseSearchHeuristic(lines, headerIndex);
+
         return results;
+    }
+
+    private static readonly Regex PackageIdInLine = new(
+        @"(?<id>[A-Za-z0-9][A-Za-z0-9._+-]*\.[A-Za-z0-9][A-Za-z0-9._+-]*)",
+        RegexOptions.Compiled);
+
+    /// <summary>표 열이 깨졌을 때 줄에서 Publisher.Package 형태 ID 를 꺼낸다.</summary>
+    private static bool TryExtractPackageId(string line, out string id, out string name, out string version)
+    {
+        id = string.Empty;
+        name = string.Empty;
+        version = string.Empty;
+
+        var m = PackageIdInLine.Match(line);
+        if (!m.Success) return false;
+
+        id = m.Groups["id"].Value;
+        if (!LooksLikePackageId(id)) return false;
+
+        name = line[..m.Index].Trim();
+        var after = line[(m.Index + m.Length)..].Trim();
+        if (after.Length > 0)
+        {
+            var token = after.Split([' ', '\t'], 2, StringSplitOptions.RemoveEmptyEntries)[0];
+            // 버전처럼 보이는 토큰만 (소스명 winget 등은 제외)
+            if (!IsKnownWingetSource(token) && !token.Contains(':', StringComparison.Ordinal))
+                version = token;
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<WingetPackageInfo> ParseSearchHeuristic(string[] lines, int headerIndex)
@@ -462,6 +542,44 @@ public sealed class WingetService(IShellService shell) : IWingetService
            && !id.Contains('\\')
            && id.Length is >= 3 and < 120
            && !id.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// winget --source 에 넣을 수 있는 값만 남긴다.
+    /// 검색 표에서 Match+Source 가 붙으면 "7-zip winget" 같은 쓰레기가 생긴다.
+    /// </summary>
+    private static string? NormalizeWingetSource(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var text = raw.Trim();
+        if (IsKnownWingetSource(text))
+            return text;
+
+        // "ProductCode: 7-zip winget" / "Tag: 7-zip         winget" → 마지막 토큰
+        var parts = text.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length >= 2 && IsKnownWingetSource(parts[^1]))
+            return parts[^1];
+
+        // 알 수 없는 소스라도 공백·콜론 없는 식별자면 허용(사용자 커스텀 소스)
+        if (!text.Contains(' ')
+            && !text.Contains(':')
+            && text.Length is >= 2 and < 40
+            && text.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.'))
+            return text;
+
+        return null;
+    }
+
+    private static bool IsKnownWingetSource(string name)
+        => name.Equals("winget", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("msstore", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("winget-font", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ExtractTrailingSourceToken(string line)
+    {
+        var parts = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts[^1];
+    }
 
     private async Task<HashSet<string>> ListInstalledIdsAsync(string wingetPath, CancellationToken ct)
     {

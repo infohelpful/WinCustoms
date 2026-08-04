@@ -192,8 +192,8 @@ public sealed partial class WingetViewModel : ObservableObject
             StatusMessage = Packages.Count == 0
                 ? $"'{query}' 검색 결과 없음"
                 : $"'{query}' 검색 결과 {Packages.Count}개"
-                  + (HideInstalled && results.Count > Packages.Count
-                      ? $" (설치됨 {results.Count - Packages.Count}개 숨김)"
+                  + (Packages.Count(p => p.IsInstalled) > 0
+                      ? $" · 설치됨 {Packages.Count(p => p.IsInstalled)}개 포함"
                       : string.Empty);
         }
         catch (Exception ex)
@@ -227,11 +227,10 @@ public sealed partial class WingetViewModel : ObservableObject
 
         if (IsSearchTabSelected)
         {
+            // 검색은 설치됨 숨기기를 적용하지 않는다.
+            // (ID 파싱이 맞아지면 이미 깔린 7-Zip 등이 통째로 사라져 "검색이 안 된다"로 보인다.)
             foreach (var package in _searchResults)
-            {
-                if (HideInstalled && package.IsInstalled) continue;
                 Packages.Add(package);
-            }
 
             NotifyListChanged();
             return;

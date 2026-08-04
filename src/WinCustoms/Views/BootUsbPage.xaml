@@ -174,9 +174,14 @@
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </StackPanel>
-                            <Button Grid.Column="1" Content="추천 선택"
-                                    Command="{x:Bind ViewModel.SelectRecommendedTweaksCommand}"
-                                    IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <Button Content="추천"
+                                        Command="{x:Bind ViewModel.SelectRecommendedTweaksCommand}"
+                                        IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}" />
+                                <Button Content="해제"
+                                        Command="{x:Bind ViewModel.ClearTweaksSelectionCommand}"
+                                        IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}" />
+                            </StackPanel>
                         </Grid>
                         <ItemsControl ItemsSource="{x:Bind ViewModel.TweakGroups, Mode=OneWay}">
                             <ItemsControl.ItemsPanel>

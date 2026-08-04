@@ -471,6 +471,14 @@ public sealed partial class BootUsbViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ClearTweaksSelection()
+    {
+        foreach (var t in Tweaks)
+            t.IsSelected = false;
+        RefreshSummaries();
+    }
+
+    [RelayCommand]
     private void SelectRecommendedDebloat()
     {
         foreach (var p in DebloatPackages)
