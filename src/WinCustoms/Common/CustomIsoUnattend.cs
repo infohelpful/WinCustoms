@@ -153,7 +153,6 @@ internal static class CustomIsoUnattend
         var useAutoLogon = request.EnableAutoLogon && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var locale = ResolveLocale(extractDir, editionName);
-        var productKey = ResolveGenericProductKey(editionName);
 
         var sb = new StringBuilder(8192);
         const string compAttrs =
@@ -162,54 +161,7 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // windowsPE — Rufus 방식: EULA·에디션·GVLK·언어·설치 중 업데이트 끔. 파티션은 수동.
-        sb.AppendLine("""  <settings pass="windowsPE">""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
-        sb.AppendLine("""      <SetupUILanguage>""");
-        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine("""      </SetupUILanguage>""");
-        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
-        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
-        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
-        sb.AppendLine("""      <DynamicUpdate>""");
-        sb.AppendLine("""        <Enable>false</Enable>""");
-        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
-        sb.AppendLine("""      </DynamicUpdate>""");
-        sb.AppendLine("""      <ComplianceCheck>""");
-        sb.AppendLine("""        <DisplayReport>Never</DisplayReport>""");
-        sb.AppendLine("""      </ComplianceCheck>""");
-
-        if (request.ImageIndex > 0)
-        {
-            sb.AppendLine("""      <ImageInstall>""");
-            sb.AppendLine("""        <OSImage>""");
-            sb.AppendLine("""          <InstallFrom>""");
-            sb.AppendLine("""            <MetaData wcm:action="add">""");
-            sb.AppendLine("""              <Key>/IMAGE/INDEX</Key>""");
-            sb.AppendLine($"              <Value>{request.ImageIndex}</Value>");
-            sb.AppendLine("""            </MetaData>""");
-            sb.AppendLine("""          </InstallFrom>""");
-            sb.AppendLine("""        </OSImage>""");
-            sb.AppendLine("""      </ImageInstall>""");
-        }
-
-        sb.AppendLine("""      <UserData>""");
-        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
-        if (!string.IsNullOrEmpty(productKey))
-        {
-            sb.AppendLine("""        <ProductKey>""");
-            sb.AppendLine($"          <Key>{productKey}</Key>");
-            sb.AppendLine("""          <WillShowUI>Never</WillShowUI>""");
-            sb.AppendLine("""        </ProductKey>""");
-        }
-        sb.AppendLine("""      </UserData>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine("""  </settings>""");
-
-        // specialize — Rufus 핵심: 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
+        // specialize — 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
         var syncCommands = BuildSpecializeCommands(request);
         if (syncCommands.Count > 0)
         {
@@ -229,7 +181,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""  </settings>""");
         }
 
-        // oobeSystem
+        // oobeSystem — 로컬 계정 생성, 자동 로그인, 개인정보/계정 OOBE 건너뛰기, 설치 후 트윅 적용.
         sb.AppendLine("""  <settings pass="oobeSystem">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
         sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
