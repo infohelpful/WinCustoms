@@ -70,29 +70,22 @@ internal static class CustomIsoUnattend
     {
         var xml = BuildXml(extractDir, request);
 
-        // Rufus 규격: 수동 파티션 선택 환경에서는 USB 루트에 autounattend.xml 을 두면
-        // WinPE 자동 설치 엔진과 수동 파티션 흐름이 충돌하여 "Windows 11을 설치하지 못했습니다" 오류가 발생합니다.
-        // 따라서 sources\$OEM$\$$\Panther\unattend.xml 에만 배치하여 윈도우 파일 복사 시
-        // %WINDIR%\Panther\unattend.xml 로 자동 주입되도록 합니다.
+        // 1. USB 루트 및 sources 백업 경로에 Autounattend.xml 작성 (초기 언어/EULA 자동 통과용)
+        var rootXml = Path.Combine(extractDir, "autounattend.xml");
+        var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
+        var sourcesXml = Path.Combine(extractDir, "sources", "unattend.xml");
+        File.WriteAllText(rootXml, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        File.WriteAllText(rootXmlUpper, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        File.WriteAllText(sourcesXml, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        // 2. sources\$OEM$\$$\Panther\unattend.xml 에도 복사 (설치 완료 후 OOBE 자동 통과용)
         var oemPantherDir = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther");
         Directory.CreateDirectory(oemPantherDir);
         File.WriteAllText(Path.Combine(oemPantherDir, "unattend.xml"), xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        // 루트 잔여 파일 정리 (오류 방지)
-        var rootXml = Path.Combine(extractDir, "autounattend.xml");
-        var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
-        var sourcesXml = Path.Combine(extractDir, "sources", "unattend.xml");
-        if (File.Exists(rootXml)) try { File.Delete(rootXml); } catch { /* */ }
-        if (File.Exists(rootXmlUpper)) try { File.Delete(rootXmlUpper); } catch { /* */ }
-        if (File.Exists(sourcesXml)) try { File.Delete(sourcesXml); } catch { /* */ }
-
-        // sources\pid.txt 및 sources\ei.cfg 처리
-        // 1. 에디션을 선택한 경우:
-        //    - pid.txt 에 제품키 주입하여 제품키 입력창 및 에디션 선택창을 건너뛰고 직행
-        //    - ei.cfg 는 삭제하여 충돌 방지
-        // 2. 에디션을 선택하지 않은 경우 (순정 그대로 / 설치 시 선택):
-        //    - pid.txt 삭제
-        //    - ei.cfg 에 [Channel]\r\nRetail 주입하여 제품키 입력창을 건너뛰고 에디션 선택창을 정상 표시
+        // 3. sources\pid.txt 및 sources\ei.cfg 처리
+        // 에디션을 선택한 경우: pid.txt 로만 제품키를 주입 (XML 안의 ProductKey 와 이중 충돌 방지)
+        // 에디션을 선택하지 않은 경우: pid.txt 삭제 및 ei.cfg 로 제품키 입력창만 건너뛰고 에디션 목록 표시
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var productKey = ResolveGenericProductKey(editionName);
         var sourcesDir = Path.Combine(extractDir, "sources");
@@ -186,10 +179,12 @@ internal static class CustomIsoUnattend
 
     private static string BuildXml(string extractDir, CustomIsoJobRequest request)
     {
-        var account = (request.LocalAccountName ?? string.Empty).Trim();
+        var rawAccount = (request.LocalAccountName ?? string.Empty).Trim();
+        // 온라인 계정 건너뛰기가 켜져 있는데 계정명을 안 쓴 경우 기본 로컬 관리자 계정 "User" 생성
+        var account = rawAccount.Length > 0 ? rawAccount : (request.SkipOnlineAccount ? "User" : string.Empty);
         var hasAccount = account.Length > 0;
         var accountEsc = WebUtility.HtmlEncode(account);
-        var useAutoLogon = request.EnableAutoLogon && hasAccount;
+        var useAutoLogon = (request.EnableAutoLogon || request.SkipOnlineAccount) && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var locale = ResolveLocale(extractDir, editionName);
 
@@ -200,7 +195,30 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // 1. specialize — BypassNRO / 개인정보 레지스트리 실행
+        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 자동 건너뛰기 (수동 파티션 선택 직행)
+        // Microsoft XSD 스키마 순서: InputLocale -> SystemLocale -> UILanguage -> UserLocale -> SetupUILanguage
+        sb.AppendLine("""  <settings pass="windowsPE">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""      </SetupUILanguage>""");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        sb.AppendLine("""      <UserData>""");
+        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        sb.AppendLine("""      </UserData>""");
+        sb.AppendLine("""      <DynamicUpdate>""");
+        sb.AppendLine("""        <Enable>false</Enable>""");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
+        sb.AppendLine("""      </DynamicUpdate>""");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine("""  </settings>""");
+
+        // 2. specialize — BypassNRO / 개인정보 레지스트리 실행
         var syncCommands = BuildSpecializeCommands(request);
         if (syncCommands.Count > 0)
         {
@@ -220,7 +238,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""  </settings>""");
         }
 
-        // 2. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
+        // 3. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
         // Microsoft-Windows-Shell-Setup XSD 스키마 순서: AutoLogon -> OOBE -> UserAccounts -> FirstLogonCommands
         sb.AppendLine("""  <settings pass="oobeSystem">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");

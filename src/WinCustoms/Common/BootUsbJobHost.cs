@@ -518,6 +518,13 @@ public static class BootUsbJobHost
                 File.Copy(bootWim, dest, overwrite: true);
             }
 
+            var autounattend = Path.Combine(extractDir, "autounattend.xml");
+            if (File.Exists(autounattend))
+            {
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "autounattend.xml"), overwrite: true);
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "Autounattend.xml"), overwrite: true);
+            }
+
             // bootmgfw 경로 보강
             var bootx64 = Path.Combine(volumes.EfiRoot, "efi", "boot", "bootx64.efi");
             if (!File.Exists(bootx64))
