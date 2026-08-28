@@ -266,14 +266,18 @@ internal static class CustomIsoUnattend
         // 1) AutoLogon (XSD: OOBE 보다 앞에 위치)
         if (useAutoLogon)
         {
+            var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
             sb.AppendLine("""      <AutoLogon>""");
-            sb.AppendLine("""        <Password>""");
-            sb.AppendLine($"          <Value>{pwdEsc}</Value>");
-            sb.AppendLine("""          <PlainText>true</PlainText>""");
-            sb.AppendLine("""        </Password>""");
+            if (hasPwd)
+            {
+                sb.AppendLine("""        <Password>""");
+                sb.AppendLine($"          <Value>{pwdEsc}</Value>");
+                sb.AppendLine("""          <PlainText>true</PlainText>""");
+                sb.AppendLine("""        </Password>""");
+            }
             sb.AppendLine("""        <Enabled>true</Enabled>""");
-            sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
+            sb.AppendLine("""        <LogonCount>1</LogonCount>""");
             sb.AppendLine($"        <Username>{accountEsc}</Username>");
             sb.AppendLine("""      </AutoLogon>""");
         }
@@ -335,7 +339,7 @@ internal static class CustomIsoUnattend
 
         sb.AppendLine("""        <SynchronousCommand wcm:action="add">""");
         sb.AppendLine($"          <Order>{order}</Order>");
-        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode(OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
+        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode("cmd.exe /c " + OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
         sb.AppendLine("""          <Description>WinCustoms registry tweaks</Description>""");
         sb.AppendLine("""        </SynchronousCommand>""");
     }
@@ -346,13 +350,13 @@ internal static class CustomIsoUnattend
 
         if (request.SkipOnlineAccount)
         {
-            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v BypassNRO /t REG_DWORD /d 1 /f");
+            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v BypassNRO /t REG_DWORD /d 1 /f");
         }
 
         if (request.SkipPrivacyExperience)
         {
-            cmds.Add("reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
-            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
         }
 
         return cmds;
