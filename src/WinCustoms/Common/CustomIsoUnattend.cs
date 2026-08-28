@@ -296,12 +296,6 @@ internal static class CustomIsoUnattend
         return sb.ToString();
     }
 
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine("""  </settings>""");
-        sb.AppendLine("""</unattend>""");
-        return sb.ToString();
-    }
-
     private static void AppendFirstLogonTweakCommand(StringBuilder sb, int order, CustomIsoJobRequest request)
     {
         if (request.RegistryOperations.Count == 0)
