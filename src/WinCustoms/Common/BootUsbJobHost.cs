@@ -500,6 +500,17 @@ public static class BootUsbJobHost
         if (!string.IsNullOrWhiteSpace(volumes.EfiRoot))
         {
             Progress(request, 95, "EFI 파티션에 부팅 파일 복사...");
+
+            // Autounattend.xml 을 EFI 파티션 루트에도 복사 (UEFI 부팅 시 응답 파일 즉시 인식 보장)
+            foreach (var xmlName in new[] { "Autounattend.xml", "autounattend.xml" })
+            {
+                var srcXml = Path.Combine(extractDir, xmlName);
+                if (File.Exists(srcXml))
+                {
+                    File.Copy(srcXml, Path.Combine(volumes.EfiRoot, xmlName), overwrite: true);
+                }
+            }
+
             // UEFI: ESP 에 efi\ + boot\ + sources\boot.wim
             foreach (var name in new[] { "efi", "boot" })
             {

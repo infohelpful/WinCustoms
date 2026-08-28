@@ -268,16 +268,12 @@ internal static class CustomIsoUnattend
         if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
         {
             sb.AppendLine("""      <OOBE>""");
-            if (request.SkipPrivacyExperience)
-            {
-                sb.AppendLine("""        <HideEULAPage>true</HideEULAPage>""");
-                sb.AppendLine("""        <ProtectYourPC>3</ProtectYourPC>""");
-            }
-            if (request.SkipOnlineAccount)
-            {
-                sb.AppendLine("""        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>""");
-                sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
-            }
+            sb.AppendLine("""        <HideEULAPage>true</HideEULAPage>""");
+            sb.AppendLine("""        <HideLocalAccountScreen>true</HideLocalAccountScreen>""");
+            sb.AppendLine("""        <HideOEMRegistrationScreens>true</HideOEMRegistrationScreens>""");
+            sb.AppendLine("""        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>""");
+            sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
+            sb.AppendLine("""        <ProtectYourPC>3</ProtectYourPC>""");
             sb.AppendLine("""      </OOBE>""");
         }
 
