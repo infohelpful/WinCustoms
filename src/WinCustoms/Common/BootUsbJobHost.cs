@@ -521,6 +521,13 @@ public static class BootUsbJobHost
                 File.Copy(bootWim, dest, overwrite: true);
             }
 
+            // PE 초기에 NTFS 를 못 읽거나 ESP 에서 응답 파일을 찾을 때를 대비해 EFI 루트에도 Autounattend.xml 복사
+            if (File.Exists(autounattend))
+            {
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "autounattend.xml"), overwrite: true);
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "Autounattend.xml"), overwrite: true);
+            }
+
             // bootmgfw 경로 보강
             var bootx64 = Path.Combine(volumes.EfiRoot, "efi", "boot", "bootx64.efi");
             if (!File.Exists(bootx64))

@@ -69,8 +69,10 @@ internal static class CustomIsoUnattend
     public static void WriteAutounattendXml(string extractDir, CustomIsoJobRequest request)
     {
         var path = Path.Combine(extractDir, "autounattend.xml");
+        var pathUpper = Path.Combine(extractDir, "Autounattend.xml");
         var xml = BuildXml(extractDir, request);
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        File.WriteAllText(pathUpper, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
         // sources\unattend.xml 백업 생성 (Windows Setup 탐색 경로 1순위)
         var sourcesUnattend = Path.Combine(extractDir, "sources", "unattend.xml");
@@ -190,6 +192,7 @@ internal static class CustomIsoUnattend
         var accountEsc = WebUtility.HtmlEncode(account);
         var useAutoLogon = request.EnableAutoLogon && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
+        var productKey = ResolveGenericProductKey(editionName);
         var locale = ResolveLocale(extractDir, editionName);
 
         var sb = new StringBuilder(8192);
@@ -199,7 +202,32 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // specialize — BypassNRO / 개인정보 레지스트리 실행
+        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 / 제품키 입력창 자동 건너뛰기 (수동 파티션 선택 직행)
+        sb.AppendLine("""  <settings pass="windowsPE">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""      </SetupUILanguage>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        sb.AppendLine("""      <UserData>""");
+        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        if (!string.IsNullOrEmpty(productKey))
+        {
+            sb.AppendLine("""        <ProductKey>""");
+            sb.AppendLine($"          <Key>{productKey}</Key>");
+            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
+            sb.AppendLine("""        </ProductKey>""");
+        }
+        sb.AppendLine("""      </UserData>""");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine("""  </settings>""");
+
+        // 2. specialize — BypassNRO / 개인정보 레지스트리 실행
         var syncCommands = BuildSpecializeCommands(request);
         if (syncCommands.Count > 0)
         {
@@ -219,7 +247,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""  </settings>""");
         }
 
-        // oobeSystem — Microsoft-Windows-International-Core + Microsoft-Windows-Shell-Setup (Rufus 동일 구조)
+        // 3. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
         sb.AppendLine("""  <settings pass="oobeSystem">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
         sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
@@ -229,7 +257,7 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
 
-        // 1. OOBE (Rufus 표준 값: HideEULAPage, ProtectYourPC)
+        // OOBE
         if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
         {
             sb.AppendLine("""      <OOBE>""");
@@ -246,7 +274,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""      </OOBE>""");
         }
 
-        // 2. UserAccounts (Rufus 표준: LocalAccount 생성)
+        // UserAccounts & AutoLogon
         if (hasAccount)
         {
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
@@ -278,7 +306,7 @@ internal static class CustomIsoUnattend
             }
         }
 
-        // 3. FirstLogonCommands
+        // FirstLogonCommands
         if (request.RegistryOperations.Count > 0)
         {
             sb.AppendLine("""      <FirstLogonCommands>""");
