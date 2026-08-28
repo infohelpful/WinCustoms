@@ -253,10 +253,7 @@ public static class CustomIsoJobHost
                 OemSetupScripts.Write(extractDir, request.AppxPackageNames, request.RegistryOperations);
             }
 
-            var xmlPath = Path.Combine(extractDir, "Autounattend.xml");
-            var hasXml = CustomIsoUnattend.NeedsUnattend(request) && File.Exists(xmlPath);
-
-            if (request.BypassSetupRequirements || request.InjectHostDrivers || hasXml)
+            if (request.BypassSetupRequirements || request.InjectHostDrivers)
             {
                 ThrowIfCancelled(request);
                 Progress(request, 82, "boot.wim 처리 중...");
@@ -265,7 +262,7 @@ public static class CustomIsoJobHost
                     mountDir,
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
-                    hasXml ? xmlPath : null,
+                    null,
                     request);
             }
 
@@ -446,16 +443,6 @@ public static class CustomIsoJobHost
                 {
                     Progress(request, null, $"boot.wim[{info.Index}] 드라이버 주입...");
                     AddDriversToImage(mountDir, driversDir, request);
-                }
-
-                // Rufus: windowsPE 패스가 있는 Autounattend.xml 을 boot.wim 루트 및 sources\unattend.xml 에 배치
-                if (!string.IsNullOrWhiteSpace(autounattendPath) && File.Exists(autounattendPath))
-                {
-                    Progress(request, null, $"boot.wim[{info.Index}] Autounattend.xml 주입...");
-                    File.Copy(autounattendPath, Path.Combine(mountDir, "Autounattend.xml"), overwrite: true);
-                    var mountSources = Path.Combine(mountDir, "sources");
-                    Directory.CreateDirectory(mountSources);
-                    File.Copy(autounattendPath, Path.Combine(mountSources, "unattend.xml"), overwrite: true);
                 }
 
                 RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);

@@ -228,7 +228,7 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""    </component>""");
         sb.AppendLine("""  </settings>""");
 
-        // 2. specialize — BypassNRO / 개인정보 레지스트리 실행
+        // 2. specialize — BypassNRO / 개인정보 레지스트리 실행 (Rufus wue.c 1:1 규격: Order -> Path)
         var syncCommands = BuildSpecializeCommands(request);
         if (syncCommands.Count > 0)
         {
@@ -240,7 +240,6 @@ internal static class CustomIsoUnattend
                 sb.AppendLine("""        <RunSynchronousCommand wcm:action="add">""");
                 sb.AppendLine($"          <Order>{i + 1}</Order>");
                 sb.AppendLine($"          <Path>{WebUtility.HtmlEncode(syncCommands[i])}</Path>");
-                sb.AppendLine("""          <Description>WinCustoms OOBE</Description>""");
                 sb.AppendLine("""        </RunSynchronousCommand>""");
             }
             sb.AppendLine("""      </RunSynchronous>""");
@@ -335,9 +334,8 @@ internal static class CustomIsoUnattend
             return;
 
         sb.AppendLine("""        <SynchronousCommand wcm:action="add">""");
+        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode(OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
         sb.AppendLine($"          <Order>{order}</Order>");
-        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode("cmd.exe /c " + OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
-        sb.AppendLine("""          <Description>WinCustoms registry tweaks</Description>""");
         sb.AppendLine("""        </SynchronousCommand>""");
     }
 
