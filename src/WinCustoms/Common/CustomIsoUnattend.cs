@@ -195,11 +195,17 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // specialize — 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
+        // specialize — 지역 언어 설정 + BypassNRO / 개인정보 레지스트리 실행
         var syncCommands = BuildSpecializeCommands(request);
+        sb.AppendLine("""  <settings pass="specialize">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""    </component>""");
         if (syncCommands.Count > 0)
         {
-            sb.AppendLine("""  <settings pass="specialize">""");
             sb.AppendLine($"""    <component name="Microsoft-Windows-Deployment" {compAttrs}>""");
             sb.AppendLine("""      <RunSynchronous>""");
             for (var i = 0; i < syncCommands.Count; i++)
@@ -212,19 +218,29 @@ internal static class CustomIsoUnattend
             }
             sb.AppendLine("""      </RunSynchronous>""");
             sb.AppendLine("""    </component>""");
-            sb.AppendLine("""  </settings>""");
         }
+        sb.AppendLine("""  </settings>""");
 
-        // oobeSystem — 로컬 계정 생성, 자동 로그인, 개인정보/계정 OOBE 건너뛰기, 설치 후 트윅 적용.
+        // oobeSystem — Microsoft-Windows-Shell-Setup 만 포함 (XSD 스키마 순서: AutoLogon -> OOBE -> UserAccounts -> FirstLogonCommands)
         sb.AppendLine("""  <settings pass="oobeSystem">""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
-        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
-        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
-        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
-        sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
 
+        // 1. AutoLogon
+        if (useAutoLogon)
+        {
+            var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
+            sb.AppendLine("""      <AutoLogon>""");
+            sb.AppendLine("""        <Password>""");
+            sb.AppendLine($"          <Value>{pwdEsc}</Value>");
+            sb.AppendLine("""          <PlainText>true</PlainText>""");
+            sb.AppendLine("""        </Password>""");
+            sb.AppendLine("""        <Enabled>true</Enabled>""");
+            sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
+            sb.AppendLine($"        <Username>{accountEsc}</Username>");
+            sb.AppendLine("""      </AutoLogon>""");
+        }
+
+        // 2. OOBE
         if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
         {
             sb.AppendLine("""      <OOBE>""");
@@ -235,28 +251,18 @@ internal static class CustomIsoUnattend
             }
             if (request.SkipOnlineAccount)
             {
+                sb.AppendLine("""        <HideLocalAccountScreen>true</HideLocalAccountScreen>""");
                 sb.AppendLine("""        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>""");
                 sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
+                sb.AppendLine("""        <NetworkLocation>Work</NetworkLocation>""");
             }
             sb.AppendLine("""      </OOBE>""");
         }
 
+        // 3. UserAccounts
         if (hasAccount)
         {
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
-            if (useAutoLogon)
-            {
-                sb.AppendLine("""      <AutoLogon>""");
-                sb.AppendLine("""        <Password>""");
-                sb.AppendLine($"          <Value>{pwdEsc}</Value>");
-                sb.AppendLine("""          <PlainText>true</PlainText>""");
-                sb.AppendLine("""        </Password>""");
-                sb.AppendLine("""        <Enabled>true</Enabled>""");
-                sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
-                sb.AppendLine($"        <Username>{accountEsc}</Username>");
-                sb.AppendLine("""      </AutoLogon>""");
-            }
-
             sb.AppendLine("""      <UserAccounts>""");
             sb.AppendLine("""        <LocalAccounts>""");
             sb.AppendLine("""          <LocalAccount wcm:action="add">""");
@@ -270,15 +276,10 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
             sb.AppendLine("""      </UserAccounts>""");
-
-            if (request.RegistryOperations.Count > 0)
-            {
-                sb.AppendLine("""      <FirstLogonCommands>""");
-                AppendFirstLogonTweakCommand(sb, order: 1, request);
-                sb.AppendLine("""      </FirstLogonCommands>""");
-            }
         }
-        else if (request.RegistryOperations.Count > 0)
+
+        // 4. FirstLogonCommands
+        if (request.RegistryOperations.Count > 0)
         {
             sb.AppendLine("""      <FirstLogonCommands>""");
             AppendFirstLogonTweakCommand(sb, order: 1, request);
@@ -309,19 +310,17 @@ internal static class CustomIsoUnattend
 
         if (request.SkipOnlineAccount)
         {
-            cmds.Add(
-                "reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" "
-                + "/v BypassNRO /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v BypassNRO /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v HideOnlineAccountScreens /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v SkipMachineOOBE /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v SkipUserOOBE /t REG_DWORD /d 1 /f");
         }
 
         if (request.SkipPrivacyExperience)
         {
-            cmds.Add(
-                "reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" "
-                + "/v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
-            cmds.Add(
-                "reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" "
-                + "/v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add("reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v PrivacyConsentStatus /t REG_DWORD /d 1 /f");
         }
 
         return cmds;
