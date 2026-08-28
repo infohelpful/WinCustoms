@@ -17,6 +17,10 @@ public sealed class BootUsbJobRequest
 {
     public string SourceIsoPath { get; set; } = string.Empty;
     public int ImageIndex { get; set; } = 1;
+
+    /// <summary>install.wim 에디션 표시 이름(자동 설치·GVLK 선택용).</summary>
+    public string EditionName { get; set; } = string.Empty;
+
     public string WorkDirectory { get; set; } = string.Empty;
 
     public int DiskNumber { get; set; }
@@ -38,6 +42,8 @@ public sealed class BootUsbJobRequest
     public bool SkipOnlineAccount { get; set; }
     public bool SkipPrivacyExperience { get; set; }
     public string LocalAccountName { get; set; } = string.Empty;
+    public bool EnableAutoLogon { get; set; }
+    public string LocalAccountPassword { get; set; } = string.Empty;
 
     public string ProgressFile { get; set; } = string.Empty;
     public string ResultFile { get; set; } = string.Empty;

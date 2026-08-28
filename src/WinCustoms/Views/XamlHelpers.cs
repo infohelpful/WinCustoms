@@ -35,4 +35,6 @@ public static class XamlHelpers
 
     public static string PendingSummary(bool hasPending)
         => hasPending ? "적용하지 않은 변경 사항이 있습니다." : "모든 변경 사항이 반영되었습니다.";
+
+    public static double InstalledCardOpacity(bool isInstalled) => isInstalled ? 1.0 : 0.45;
 }

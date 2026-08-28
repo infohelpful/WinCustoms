@@ -20,15 +20,8 @@ public sealed partial class DebloatPage : Page
     {
         base.OnNavigatedTo(e);
 
-        // IsEmpty 는 한 번이라도 읽어온 뒤에만 true 가 되므로, 결과가 0건이어도 재조회하지 않는다.
         if (ViewModel.Packages.Count == 0 && !ViewModel.IsEmpty)
             await ViewModel.LoadCommand.ExecuteAsync(null);
-    }
-
-    private void OnShowAllClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is CheckBox box)
-            ViewModel.HideUninstalled = box.IsChecked != true;
     }
 
     private async void OnOpenStoreClick(object sender, RoutedEventArgs e)

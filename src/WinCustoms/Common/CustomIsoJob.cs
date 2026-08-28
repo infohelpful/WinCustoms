@@ -8,6 +8,10 @@ public sealed class CustomIsoJobRequest
     public string SourceIsoPath { get; set; } = string.Empty;
     public string OutputIsoPath { get; set; } = string.Empty;
     public int ImageIndex { get; set; } = 1;
+
+    /// <summary>install.wim 에디션 표시 이름(자동 설치·GVLK 선택용).</summary>
+    public string EditionName { get; set; } = string.Empty;
+
     public string WorkDirectory { get; set; } = string.Empty;
 
     public List<RegistryOperation> RegistryOperations { get; set; } = [];
@@ -29,6 +33,12 @@ public sealed class CustomIsoJobRequest
 
     /// <summary>로컬 관리자 계정 이름. 비어 있지 않으면 설치 후 해당 계정으로 바로 로그인 가능.</summary>
     public string LocalAccountName { get; set; } = string.Empty;
+
+    /// <summary>설치 후 매 부팅마다 자동 로그인(비밀번호 필수).</summary>
+    public bool EnableAutoLogon { get; set; }
+
+    /// <summary>로컬 계정·AutoLogon 비밀번호(평문, autounattend Base64 인코딩용).</summary>
+    public string LocalAccountPassword { get; set; } = string.Empty;
 
     public string ProgressFile { get; set; } = string.Empty;
     public string ResultFile { get; set; } = string.Empty;

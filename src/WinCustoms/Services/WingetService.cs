@@ -288,9 +288,48 @@ public sealed class WingetService(IShellService shell) : IWingetService
 
         var detail = string.IsNullOrWhiteSpace(result.Combined)
             ? $"종료 코드 {result.ExitCode}"
-            : result.Combined.Trim();
+            : SummarizeWingetFailure(result.Combined, result.ExitCode);
 
         throw new InvalidOperationException(Truncate(detail, 400));
+    }
+
+    /// <summary>
+    /// winget 전체 로그(Found/라이선스/Downloading…)를 그대로 오류로 보여 주지 않고,
+    /// 실제 실패 원인 줄만 골라낸다.
+    /// </summary>
+    private static string SummarizeWingetFailure(string combined, int exitCode)
+    {
+        var lines = combined
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static l => l.Length > 0)
+            .Where(static l => !IsWingetNoiseLine(l))
+            .ToList();
+
+        if (lines.Count > 0)
+            return string.Join(Environment.NewLine, lines.TakeLast(4));
+
+        // 진행 로그만 있고 실패 문구가 없으면(중간에 끊김 등)
+        if (combined.Contains("Downloading", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("다운로드", StringComparison.OrdinalIgnoreCase))
+        {
+            return "다운로드/설치가 끝나기 전에 중단된 것 같습니다. 네트워크·백신 차단을 확인한 뒤 다시 시도하세요."
+                   + $" (코드 {exitCode})";
+        }
+
+        return $"설치에 실패했습니다. (코드 {exitCode})";
+    }
+
+    private static bool IsWingetNoiseLine(string line)
+    {
+        if (line.StartsWith("Found ", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("This application is licensed", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Microsoft is not responsible", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Downloading ", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.StartsWith("Downloading:", StringComparison.OrdinalIgnoreCase)) return true;
+        if (line.Contains("████", StringComparison.Ordinal)) return true; // 진행 바
+        if (line.StartsWith("  ████", StringComparison.Ordinal)) return true;
+        if (line.Equals("…", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private void MarkInstalled(WingetPackageInfo package)

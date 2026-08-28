@@ -53,6 +53,7 @@ public sealed class BootUsbService(ICustomIsoService iso, IElevationService elev
             {
                 SourceIsoPath = Path.GetFullPath(requestTemplate.SourceIsoPath),
                 ImageIndex = requestTemplate.ImageIndex <= 0 ? 1 : requestTemplate.ImageIndex,
+                EditionName = requestTemplate.EditionName ?? string.Empty,
                 WorkDirectory = work,
                 DiskNumber = requestTemplate.DiskNumber,
                 DiskFriendlyName = requestTemplate.DiskFriendlyName,
@@ -69,7 +70,9 @@ public sealed class BootUsbService(ICustomIsoService iso, IElevationService elev
                 InjectHostDrivers = requestTemplate.InjectHostDrivers,
                 SkipOnlineAccount = requestTemplate.SkipOnlineAccount,
                 SkipPrivacyExperience = requestTemplate.SkipPrivacyExperience,
-                LocalAccountName = (requestTemplate.LocalAccountName ?? string.Empty).Trim()
+                LocalAccountName = (requestTemplate.LocalAccountName ?? string.Empty).Trim(),
+                EnableAutoLogon = requestTemplate.EnableAutoLogon,
+                LocalAccountPassword = requestTemplate.LocalAccountPassword ?? string.Empty
             };
 
             return await RunElevatedAsync(request, progress, ct).ConfigureAwait(false);

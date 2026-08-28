@@ -19,6 +19,7 @@ public interface ICustomIsoService
         string sourceIso,
         string outputIso,
         int imageIndex,
+        string editionName,
         IReadOnlyList<TweakItem> tweaks,
         IReadOnlyList<string> appxPackageNames,
         bool bypassSetupRequirements,
@@ -26,6 +27,8 @@ public interface ICustomIsoService
         bool skipOnlineAccount,
         bool skipPrivacyExperience,
         string? localAccountName,
+        bool enableAutoLogon,
+        string? localAccountPassword,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default);
 }
@@ -173,6 +176,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         string sourceIso,
         string outputIso,
         int imageIndex,
+        string editionName,
         IReadOnlyList<TweakItem> tweaks,
         IReadOnlyList<string> appxPackageNames,
         bool bypassSetupRequirements,
@@ -180,6 +184,8 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         bool skipOnlineAccount,
         bool skipPrivacyExperience,
         string? localAccountName,
+        bool enableAutoLogon,
+        string? localAccountPassword,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default)
     {
@@ -197,6 +203,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
                 SourceIsoPath = Path.GetFullPath(sourceIso),
                 OutputIsoPath = Path.GetFullPath(outputIso),
                 ImageIndex = imageIndex <= 0 ? 1 : imageIndex,
+                EditionName = (editionName ?? string.Empty).Trim(),
                 WorkDirectory = work,
                 RegistryOperations = ops,
                 AppxPackageNames = appxPackageNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
@@ -204,7 +211,9 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
                 InjectHostDrivers = injectHostDrivers,
                 SkipOnlineAccount = skipOnlineAccount,
                 SkipPrivacyExperience = skipPrivacyExperience,
-                LocalAccountName = (localAccountName ?? string.Empty).Trim()
+                LocalAccountName = (localAccountName ?? string.Empty).Trim(),
+                EnableAutoLogon = enableAutoLogon,
+                LocalAccountPassword = localAccountPassword ?? string.Empty
             };
 
             return await RunElevatedAsync(request, progress, ct).ConfigureAwait(false);

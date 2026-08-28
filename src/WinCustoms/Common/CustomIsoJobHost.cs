@@ -189,8 +189,18 @@ public static class CustomIsoJobHost
                 ThrowIfCancelled(request);
                 if (request.AppxPackageNames.Count > 0)
                 {
-                    Progress(request, 60, "프로비저닝 앱 제거 중...");
-                    RemoveProvisionedApps(mountDir, request.AppxPackageNames, request);
+                    Progress(request, 60, "프로비저닝 앱 제거 중 (install.wim 오프라인)...");
+                    ProvisionedAppxRemover.RemoveFromMountedImage(
+                        mountDir,
+                        request.AppxPackageNames,
+                        m => Progress(request, null, m),
+                        () => ThrowIfCancelled(request));
+
+                    Progress(request, 62, "앱 재설치 방지 레지스트리 적용...");
+                    OfflineRegistryApplier.Apply(
+                        mountDir,
+                        ProvisionedAppxRemover.BuildAntiReprovisionRegistryOps(),
+                        m => Progress(request, null, m));
                 }
 
                 if (request.InjectHostDrivers)
@@ -229,7 +239,26 @@ public static class CustomIsoJobHost
                 Progress(request, 50, "이미지 커스터마이즈 없음 — 추출본 그대로 사용");
             }
 
-            if (request.BypassSetupRequirements || request.InjectHostDrivers)
+            if (CustomIsoUnattend.NeedsUnattend(request))
+            {
+                ThrowIfCancelled(request);
+                Progress(request, 80, "autounattend.xml 작성...");
+                CustomIsoUnattend.WriteAutounattendXml(extractDir, request);
+                CustomIsoUnattend.WriteOemPantherCopy(extractDir);
+            }
+
+            if (request.AppxPackageNames.Count > 0 || request.RegistryOperations.Count > 0)
+            {
+                ThrowIfCancelled(request);
+                Progress(request, 81, "설치 후처리 스크립트 작성...");
+                OemSetupScripts.Write(extractDir, request.AppxPackageNames, request.RegistryOperations);
+            }
+
+            var autounattendPath = CustomIsoUnattend.NeedsUnattend(request)
+                ? Path.Combine(extractDir, "autounattend.xml")
+                : null;
+
+            if (request.BypassSetupRequirements || request.InjectHostDrivers || autounattendPath is not null)
             {
                 ThrowIfCancelled(request);
                 Progress(request, 82, "boot.wim 처리 중...");
@@ -238,14 +267,8 @@ public static class CustomIsoJobHost
                     mountDir,
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
+                    autounattendPath,
                     request);
-            }
-
-            if (CustomIsoUnattend.NeedsUnattend(request))
-            {
-                ThrowIfCancelled(request);
-                Progress(request, 88, "autounattend.xml 작성...");
-                CustomIsoUnattend.WriteAutounattendXml(extractDir, request);
             }
 
             Progress(request, 89, "설치 미디어 준비 완료");
@@ -380,6 +403,7 @@ public static class CustomIsoJobHost
         string mountDir,
         bool bypass,
         string? driversDir,
+        string? autounattendPath,
         CustomIsoJobRequest request)
     {
         if (!File.Exists(bootWim))
@@ -426,6 +450,13 @@ public static class CustomIsoJobHost
                     AddDriversToImage(mountDir, driversDir, request);
                 }
 
+                // Rufus: windowsPE 패스가 있는 Autounattend.xml 을 boot.wim 루트에 넣으면 Setup 이 Panther 로 복사한다.
+                if (!string.IsNullOrWhiteSpace(autounattendPath) && File.Exists(autounattendPath))
+                {
+                    Progress(request, null, $"boot.wim[{info.Index}] Autounattend.xml 주입...");
+                    File.Copy(autounattendPath, Path.Combine(mountDir, "Autounattend.xml"), overwrite: true);
+                }
+
                 RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
                 mounted = false;
             }
@@ -442,48 +473,6 @@ public static class CustomIsoJobHost
                         // ignore
                     }
                 }
-            }
-        }
-    }
-
-    private static void RemoveProvisionedApps(string mountDir, List<string> names, CustomIsoJobRequest request)
-    {
-        var wanted = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-        var listScript = $$"""
-            $ErrorActionPreference = 'SilentlyContinue'
-            Get-AppxProvisionedPackage -Path '{{mountDir.Replace("'", "''")}}' |
-              ForEach-Object { $_.PackageName + '|' + $_.DisplayName }
-            """;
-        var output = RunPowerShellCapture(listScript, request);
-        var packages = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        foreach (var line in packages)
-        {
-            ThrowIfCancelled(request);
-            var packageName = line.Split('|')[0].Trim();
-            if (string.IsNullOrEmpty(packageName)) continue;
-
-            // PackageName 형식: Name_Version_... — 앞 토큰과 카탈로그 이름 매칭
-            var shortName = packageName.Split('_')[0];
-            var match = wanted.Any(w =>
-                packageName.StartsWith(w + "_", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(shortName, w, StringComparison.OrdinalIgnoreCase)
-                || packageName.Contains(w, StringComparison.OrdinalIgnoreCase));
-
-            if (!match) continue;
-
-            Progress(request, null, "제거: " + packageName);
-            try
-            {
-                RunDism([
-                    "/Image:" + mountDir,
-                    "/Remove-ProvisionedAppxPackage",
-                    "/PackageName:" + packageName
-                ], request, ignoreExit: true);
-            }
-            catch (Exception ex)
-            {
-                Progress(request, null, "제거 실패(무시): " + ex.Message);
             }
         }
     }

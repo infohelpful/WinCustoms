@@ -110,8 +110,8 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     public string Title => "커스텀 ISO";
 
     public string Subtitle =>
-        "순정 Windows 11 ISO에 트윅·앱 제거·OOBE 간편 설정(온라인 계정·개인정보 건너뛰기, 로컬 계정)을 이식해 "
-        + "클린 설치용 커스텀 ISO를 만듭니다.";
+        "순정 Windows 11 ISO에 Rufus 스타일 무인 설치(라이선스·에디션·키·언어 자동, 파티션만 수동)와 "
+        + "트윅·앱 제거·OOBE·자동 로그인을 이식해 클린 설치용 ISO를 만듭니다.";
 
     /// <summary>플랫 목록(빌드 시 선택 집계용).</summary>
     public ObservableCollection<CustomIsoSelectableTweak> Tweaks { get; } = [];
@@ -152,6 +152,40 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     /// <summary>설치 직후 사용할 로컬 관리자 계정 이름(빈 비밀번호).</summary>
     [ObservableProperty]
     public partial string LocalAccountName { get; set; } = "admin";
+
+    [ObservableProperty]
+    public partial bool EnableAutoLogon { get; set; }
+
+    [ObservableProperty]
+    public partial string LocalAccountPassword { get; set; } = string.Empty;
+
+    public bool ShowLocalAccountOptions => SkipOnlineAccount;
+    public bool CanEditLocalAccountOptions => SkipOnlineAccount && !IsBusy;
+    public bool ShowAutoLogonPassword => SkipOnlineAccount && EnableAutoLogon;
+    public bool ShowManualPasswordHint => SkipOnlineAccount && !EnableAutoLogon;
+
+    partial void OnSkipOnlineAccountChanged(bool value)
+    {
+        if (!value)
+        {
+            EnableAutoLogon = false;
+            LocalAccountPassword = string.Empty;
+        }
+
+        NotifyLocalAccountUi();
+    }
+
+    partial void OnEnableAutoLogonChanged(bool value) => NotifyLocalAccountUi();
+
+    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(CanEditLocalAccountOptions));
+
+    private void NotifyLocalAccountUi()
+    {
+        OnPropertyChanged(nameof(ShowLocalAccountOptions));
+        OnPropertyChanged(nameof(CanEditLocalAccountOptions));
+        OnPropertyChanged(nameof(ShowAutoLogonPassword));
+        OnPropertyChanged(nameof(ShowManualPasswordHint));
+    }
 
     [ObservableProperty]
     public partial bool IsDebloatExpanded { get; set; }
@@ -403,33 +437,39 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var localName = (LocalAccountName ?? string.Empty).Trim();
-        var accountError = CustomIsoUnattend.ValidateAccountName(localName);
-        if (accountError is not null)
+        var localName = SkipOnlineAccount
+            ? (LocalAccountName ?? string.Empty).Trim()
+            : string.Empty;
+        if (SkipOnlineAccount)
         {
-            StatusMessage = accountError;
-            await _dialog.ShowMessageAsync("계정 이름", accountError);
-            return;
+            var accountError = CustomIsoUnattend.ValidateAccountName(localName);
+            if (accountError is not null)
+            {
+                StatusMessage = accountError;
+                await _dialog.ShowMessageAsync("계정 이름", accountError);
+                return;
+            }
+
+            var autoLogonError = CustomIsoUnattend.ValidateAutoLogon(
+                localName, EnableAutoLogon, LocalAccountPassword);
+            if (autoLogonError is not null)
+            {
+                StatusMessage = autoLogonError;
+                await _dialog.ShowMessageAsync("자동 로그인", autoLogonError);
+                return;
+            }
         }
 
-        var hasOobe = SkipOnlineAccount || SkipPrivacyExperience || localName.Length > 0;
-
-        if (selectedTweaks.Count == 0
-            && appNames.Count == 0
-            && !BypassSetupRequirements
-            && !InjectHostDrivers
-            && !hasOobe)
+        var extras = new List<string>
         {
-            StatusMessage = "트윅·앱 제거·설치 옵션·OOBE 간편 설정 중 하나 이상을 선택하세요.";
-            return;
-        }
-
-        var extras = new List<string>();
+            "무인 설치: 라이선스·에디션·키·언어 자동, 설치 중 업데이트 끔, 파티션만 수동"
+        };
         if (BypassSetupRequirements) extras.Add("설치 검사 우회");
         if (InjectHostDrivers) extras.Add("현재 PC 드라이버 주입");
         if (SkipOnlineAccount) extras.Add("온라인 계정 건너뛰기");
         if (SkipPrivacyExperience) extras.Add("개인정보 화면 건너뛰기");
-        if (localName.Length > 0) extras.Add($"로컬 계정: {localName}");
+        if (SkipOnlineAccount && localName.Length > 0) extras.Add($"로컬 계정: {localName}");
+        if (SkipOnlineAccount && EnableAutoLogon) extras.Add("자동 로그인");
 
         var confirmed = await _dialog.ConfirmAsync(
             "커스텀 ISO 만들기",
@@ -443,9 +483,12 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             + "· 수십 GB 여유 공간과 시간이 필요합니다.\n"
             + "· 관리자 권한(UAC)이 필요합니다.\n"
             + "· 결과 ISO는 클린 설치용입니다 (업그레이드 설치는 효과가 제한적일 수 있음).\n"
+            + "· 부팅 후 파티션만 고르면 이후 설치·OOBE는 autounattend.xml로 자동 진행됩니다.\n"
             + "· 드라이버 주입은 이 PC와 같은(또는 호환) 하드웨어용입니다.\n"
-            + (localName.Length > 0
-                ? "· 로컬 계정은 비밀번호 없이 만들어지며, 설치 직후 한 번 자동 로그인됩니다.\n"
+            + (SkipOnlineAccount && localName.Length > 0
+                ? EnableAutoLogon
+                    ? "· 로컬 계정과 비밀번호가 적용되며, 이후 부팅마다 자동 로그인됩니다.\n"
+                    : "· 로컬 계정이 비밀번호 없이 만들어집니다.\n"
                 : string.Empty)
             + "· 순정 ISO는 사용자가 적법하게 보유한 파일이어야 합니다.\n\n"
             + "시작할까요?",
@@ -460,6 +503,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 SourceIsoPath,
                 OutputIsoPath,
                 SelectedEdition.Index,
+                SelectedEdition.Name,
                 selectedTweaks,
                 appNames,
                 BypassSetupRequirements,
@@ -467,6 +511,8 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 SkipOnlineAccount,
                 SkipPrivacyExperience,
                 localName,
+                SkipOnlineAccount && EnableAutoLogon,
+                SkipOnlineAccount && EnableAutoLogon ? LocalAccountPassword : string.Empty,
                 progress,
                 ct);
 
@@ -481,7 +527,8 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             await _dialog.ShowMessageAsync(
                 "완료",
                 $"커스텀 설치 ISO를 저장했습니다.\n\n{result.OutputIsoPath}\n\n"
-                + "USB에 Rufus 등으로 구운 뒤 클린 설치하세요.");
+                + "ISO 루트·boot.wim·$OEM$ 에 autounattend.xml 이 포함되어 있습니다.\n"
+                + "Rufus 등으로 USB에 구운 뒤 부팅하면 파티션만 선택하면 됩니다.");
         });
     }
 

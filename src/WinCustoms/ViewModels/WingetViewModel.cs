@@ -351,7 +351,7 @@ public sealed partial class WingetViewModel : ObservableObject
                     else
                     {
                         fail++;
-                        package.LastError = ex.Message;
+                        package.LastError = SanitizeWingetError(ex.Message);
                     }
                 }
                 finally

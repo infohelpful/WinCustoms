@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -6,8 +7,9 @@ using Microsoft.Win32;
 namespace WinCustoms.Common;
 
 /// <summary>
-/// 커스텀 ISO용 autounattend.xml 및 OOBE 관련 오프라인 레지스트리.
-/// Win11 클린 설치에서 온라인 계정·개인정보 화면을 줄이고 로컬 계정을 미리 만든다.
+/// 커스텀 ISO/USB용 autounattend.xml 및 OOBE 관련 오프라인 레지스트리.
+/// Win11 25H2: Rufus 와 동일하게 windowsPE(라이선스·에디션·키·언어·업데이트) +
+/// specialize(BypassNRO) + oobeSystem 을 구성한다. 디스크 파티션은 사용자가 수동 선택.
 /// </summary>
 internal static class CustomIsoUnattend
 {
@@ -17,7 +19,10 @@ internal static class CustomIsoUnattend
     public static bool NeedsUnattend(CustomIsoJobRequest request) =>
         request.SkipOnlineAccount
         || request.SkipPrivacyExperience
-        || !string.IsNullOrWhiteSpace(request.LocalAccountName);
+        || !string.IsNullOrWhiteSpace(request.LocalAccountName)
+        || request.EnableAutoLogon
+        || !string.IsNullOrWhiteSpace(request.EditionName)
+        || request.RegistryOperations.Count > 0;
 
     /// <summary>Windows 로컬 계정 이름 규칙. 통과하면 null, 실패하면 한글 오류 메시지.</summary>
     public static string? ValidateAccountName(string? name)
@@ -38,11 +43,48 @@ internal static class CustomIsoUnattend
         return null;
     }
 
+    /// <summary>AutoLogon 사용 시 계정·비밀번호 검사. 통과하면 null.</summary>
+    public static string? ValidateAutoLogon(string? accountName, bool enableAutoLogon, string? password)
+    {
+        if (!enableAutoLogon)
+            return null;
+
+        var name = (accountName ?? string.Empty).Trim();
+        if (name.Length == 0)
+            return "자동 로그인을 쓰려면 로컬 계정 이름을 입력하세요.";
+
+        var accountError = ValidateAccountName(name);
+        if (accountError is not null)
+            return accountError;
+
+        var pwd = password ?? string.Empty;
+        if (pwd.Length == 0)
+            return "자동 로그인을 쓰려면 비밀번호를 입력하세요.";
+        if (pwd.Length > 127)
+            return "비밀번호는 127자 이하여야 합니다.";
+
+        return null;
+    }
+
     public static void WriteAutounattendXml(string extractDir, CustomIsoJobRequest request)
     {
         var path = Path.Combine(extractDir, "autounattend.xml");
-        var xml = BuildXml(request);
+        var xml = BuildXml(extractDir, request);
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+    }
+
+    /// <summary>
+    /// Rufus: windowsPE 가 없을 때 $OEM$\$$\Panther\unattend.xml 백업 경로.
+    /// windowsPE 가 있어도 이중 안전을 위해 함께 쓴다.
+    /// </summary>
+    public static void WriteOemPantherCopy(string extractDir)
+    {
+        var src = Path.Combine(extractDir, "autounattend.xml");
+        if (!File.Exists(src)) return;
+
+        var dest = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther", "unattend.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+        File.Copy(src, dest, overwrite: true);
     }
 
     public static List<RegistryOperation> BuildOfflineRegistryOps(CustomIsoJobRequest request)
@@ -74,7 +116,6 @@ internal static class CustomIsoUnattend
                 RegistryValueKind.DWord,
                 1));
 
-            // Default 사용자 하이브 — 새 로컬 계정에도 적용
             ops.Add(RegistryOperation.Set(
                 RegistryRoot.CurrentUser,
                 @"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo",
@@ -104,41 +145,132 @@ internal static class CustomIsoUnattend
         return ops;
     }
 
-    private static string BuildXml(CustomIsoJobRequest request)
+    private static string BuildXml(string extractDir, CustomIsoJobRequest request)
     {
         var account = (request.LocalAccountName ?? string.Empty).Trim();
         var hasAccount = account.Length > 0;
         var accountEsc = WebUtility.HtmlEncode(account);
+        var useAutoLogon = request.EnableAutoLogon && hasAccount;
+        var editionName = (request.EditionName ?? string.Empty).Trim();
+        var locale = ResolveLocale(extractDir, editionName);
+        var productKey = ResolveGenericProductKey(editionName);
 
-        var hideOnline = request.SkipOnlineAccount || hasAccount ? "true" : "false";
-        // ProtectYourPC=3 → 권장 설정 끄기(개인정보 관련 OOBE를 약화)
-        var protect = request.SkipPrivacyExperience ? "3" : "1";
+        var sb = new StringBuilder(8192);
+        const string compAttrs =
+            """processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" """;
 
-        var sb = new StringBuilder(4096);
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // windowsPE — EULA 수락 (언어는 이미지 기본값 유지, 디스크/에디션은 사용자가 선택)
+        // windowsPE — Rufus 방식: EULA·에디션·GVLK·언어·설치 중 업데이트 끔. 파티션은 수동.
         sb.AppendLine("""  <settings pass="windowsPE">""");
-        sb.AppendLine("""    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""      </SetupUILanguage>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        sb.AppendLine("""      <DynamicUpdate>""");
+        sb.AppendLine("""        <Enable>false</Enable>""");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
+        sb.AppendLine("""      </DynamicUpdate>""");
+        sb.AppendLine("""      <ComplianceCheck>""");
+        sb.AppendLine("""        <DisplayReport>Never</DisplayReport>""");
+        sb.AppendLine("""      </ComplianceCheck>""");
+
+        if (request.ImageIndex > 0)
+        {
+            sb.AppendLine("""      <ImageInstall>""");
+            sb.AppendLine("""        <OSImage>""");
+            sb.AppendLine("""          <InstallFrom>""");
+            sb.AppendLine("""            <MetaData wcm:action="add">""");
+            sb.AppendLine("""              <Key>/IMAGE/INDEX</Key>""");
+            sb.AppendLine($"              <Value>{request.ImageIndex}</Value>");
+            sb.AppendLine("""            </MetaData>""");
+            sb.AppendLine("""          </InstallFrom>""");
+            sb.AppendLine("""        </OSImage>""");
+            sb.AppendLine("""      </ImageInstall>""");
+        }
+
         sb.AppendLine("""      <UserData>""");
         sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        if (!string.IsNullOrEmpty(productKey))
+        {
+            sb.AppendLine("""        <ProductKey>""");
+            sb.AppendLine($"          <Key>{productKey}</Key>");
+            sb.AppendLine("""          <WillShowUI>Never</WillShowUI>""");
+            sb.AppendLine("""        </ProductKey>""");
+        }
         sb.AppendLine("""      </UserData>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine("""  </settings>""");
 
+        // specialize — Rufus 핵심: 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
+        var syncCommands = BuildSpecializeCommands(request);
+        if (syncCommands.Count > 0)
+        {
+            sb.AppendLine("""  <settings pass="specialize">""");
+            sb.AppendLine($"""    <component name="Microsoft-Windows-Deployment" {compAttrs}>""");
+            sb.AppendLine("""      <RunSynchronous>""");
+            for (var i = 0; i < syncCommands.Count; i++)
+            {
+                sb.AppendLine("""        <RunSynchronousCommand wcm:action="add">""");
+                sb.AppendLine($"          <Order>{i + 1}</Order>");
+                sb.AppendLine($"          <Path>{WebUtility.HtmlEncode(syncCommands[i])}</Path>");
+                sb.AppendLine("""          <Description>WinCustoms OOBE</Description>""");
+                sb.AppendLine("""        </RunSynchronousCommand>""");
+            }
+            sb.AppendLine("""      </RunSynchronous>""");
+            sb.AppendLine("""    </component>""");
+            sb.AppendLine("""  </settings>""");
+        }
+
+        // oobeSystem
         sb.AppendLine("""  <settings pass="oobeSystem">""");
-        sb.AppendLine("""    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">""");
-        sb.AppendLine("""      <OOBE>""");
-        sb.AppendLine("""        <HideEULAPage>true</HideEULAPage>""");
-        sb.AppendLine("""        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>""");
-        sb.AppendLine($"        <HideOnlineAccountScreens>{hideOnline}</HideOnlineAccountScreens>");
-        sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
-        sb.AppendLine($"        <ProtectYourPC>{protect}</ProtectYourPC>");
-        sb.AppendLine("""      </OOBE>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
+
+        if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
+        {
+            sb.AppendLine("""      <OOBE>""");
+            if (request.SkipPrivacyExperience)
+            {
+                sb.AppendLine("""        <HideEULAPage>true</HideEULAPage>""");
+                sb.AppendLine("""        <ProtectYourPC>3</ProtectYourPC>""");
+            }
+            if (request.SkipOnlineAccount)
+            {
+                sb.AppendLine("""        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>""");
+                sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
+            }
+            sb.AppendLine("""      </OOBE>""");
+        }
 
         if (hasAccount)
         {
+            if (useAutoLogon)
+            {
+                var passwordB64 = EncodePasswordB64(request.LocalAccountPassword);
+                sb.AppendLine("""      <AutoLogon>""");
+                sb.AppendLine("""        <Password>""");
+                sb.AppendLine($"          <Value>{passwordB64}</Value>");
+                sb.AppendLine("""          <PlainText>false</PlainText>""");
+                sb.AppendLine("""        </Password>""");
+                sb.AppendLine("""        <Enabled>true</Enabled>""");
+                sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
+                sb.AppendLine($"        <Username>{accountEsc}</Username>");
+                sb.AppendLine("""      </AutoLogon>""");
+            }
+
             sb.AppendLine("""      <UserAccounts>""");
             sb.AppendLine("""        <LocalAccounts>""");
             sb.AppendLine("""          <LocalAccount wcm:action="add">""");
@@ -146,21 +278,33 @@ internal static class CustomIsoUnattend
             sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
             sb.AppendLine("""            <Group>Administrators</Group>""");
             sb.AppendLine("""            <Password>""");
-            sb.AppendLine("""              <Value></Value>""");
-            sb.AppendLine("""              <PlainText>true</PlainText>""");
+            if (useAutoLogon)
+            {
+                sb.AppendLine($"              <Value>{EncodePasswordB64(request.LocalAccountPassword)}</Value>");
+                sb.AppendLine("""              <PlainText>false</PlainText>""");
+            }
+            else
+            {
+                sb.AppendLine("""              <Value></Value>""");
+                sb.AppendLine("""              <PlainText>true</PlainText>""");
+            }
             sb.AppendLine("""            </Password>""");
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
             sb.AppendLine("""      </UserAccounts>""");
-            sb.AppendLine("""      <AutoLogon>""");
-            sb.AppendLine("""        <Enabled>true</Enabled>""");
-            sb.AppendLine($"        <Username>{accountEsc}</Username>");
-            sb.AppendLine("""        <Password>""");
-            sb.AppendLine("""          <Value></Value>""");
-            sb.AppendLine("""          <PlainText>true</PlainText>""");
-            sb.AppendLine("""        </Password>""");
-            sb.AppendLine("""        <LogonCount>1</LogonCount>""");
-            sb.AppendLine("""      </AutoLogon>""");
+
+            if (request.RegistryOperations.Count > 0)
+            {
+                sb.AppendLine("""      <FirstLogonCommands>""");
+                AppendFirstLogonTweakCommand(sb, order: 1, request);
+                sb.AppendLine("""      </FirstLogonCommands>""");
+            }
+        }
+        else if (request.RegistryOperations.Count > 0)
+        {
+            sb.AppendLine("""      <FirstLogonCommands>""");
+            AppendFirstLogonTweakCommand(sb, order: 1, request);
+            sb.AppendLine("""      </FirstLogonCommands>""");
         }
 
         sb.AppendLine("""    </component>""");
@@ -168,4 +312,158 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""</unattend>""");
         return sb.ToString();
     }
+
+    private static void AppendFirstLogonTweakCommand(StringBuilder sb, int order, CustomIsoJobRequest request)
+    {
+        if (request.RegistryOperations.Count == 0)
+            return;
+
+        sb.AppendLine("""        <SynchronousCommand wcm:action="add">""");
+        sb.AppendLine($"          <Order>{order}</Order>");
+        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode(OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
+        sb.AppendLine("""          <Description>WinCustoms registry tweaks</Description>""");
+        sb.AppendLine("""        </SynchronousCommand>""");
+    }
+
+    private static List<string> BuildSpecializeCommands(CustomIsoJobRequest request)
+    {
+        var cmds = new List<string>();
+
+        if (request.SkipOnlineAccount)
+        {
+            cmds.Add(
+                "reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" "
+                + "/v BypassNRO /t REG_DWORD /d 1 /f");
+        }
+
+        if (request.SkipPrivacyExperience)
+        {
+            cmds.Add(
+                "reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" "
+                + "/v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add(
+                "reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" "
+                + "/v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+        }
+
+        return cmds;
+    }
+
+    private sealed record LocaleSettings(
+        string UiLanguage,
+        string InputLocale,
+        string SystemLocale,
+        string UserLocale);
+
+    private static LocaleSettings ResolveLocale(string extractDir, string editionName)
+    {
+        var lang = DetectUiLanguage(extractDir) ?? GuessLanguageFromEdition(editionName);
+        return MapLocale(lang);
+    }
+
+    private static string? DetectUiLanguage(string extractDir)
+    {
+        var bootWim = Path.Combine(extractDir, "sources", "boot.wim");
+        if (!File.Exists(bootWim))
+            return null;
+
+        var dism = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "dism.exe");
+        if (!File.Exists(dism))
+            return null;
+
+        for (var index = 1; index <= 4; index++)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = dism,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            ConsoleEncoding.ApplyOemTo(psi);
+            psi.ArgumentList.Add("/Get-WimInfo");
+            psi.ArgumentList.Add($"/WimFile:{bootWim}");
+            psi.ArgumentList.Add($"/Index:{index}");
+
+            using var p = Process.Start(psi);
+            if (p is null)
+                continue;
+
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(30_000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* */ }
+                continue;
+            }
+
+            var output = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult())
+                         + ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult());
+            if (p.ExitCode != 0)
+                continue;
+
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (!line.Contains("Default Language", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var colon = line.IndexOf(':');
+                if (colon < 0 || colon >= line.Length - 1)
+                    continue;
+
+                var lang = line[(colon + 1)..].Trim();
+                if (lang.Length >= 2)
+                    return lang;
+            }
+        }
+
+        return null;
+    }
+
+    private static string GuessLanguageFromEdition(string editionName)
+    {
+        if (editionName.Contains("Korean", StringComparison.OrdinalIgnoreCase)
+            || editionName.Contains("한국", StringComparison.OrdinalIgnoreCase)
+            || editionName.Contains("대한민국", StringComparison.OrdinalIgnoreCase))
+            return "ko-KR";
+
+        return "en-US";
+    }
+
+    private static LocaleSettings MapLocale(string lang)
+    {
+        var normalized = lang.Replace('_', '-');
+        if (normalized.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
+            return new LocaleSettings("ko-KR", "0412:00000412", "ko-KR", "ko-KR");
+
+        return new LocaleSettings("en-US", "0409:00000409", "en-US", "en-US");
+    }
+
+    /// <summary>Windows 11 GVLK — 에디션 이름으로 추론(Rufus wue.c 와 동일 순서).</summary>
+    private static string ResolveGenericProductKey(string editionName)
+    {
+        if (string.IsNullOrWhiteSpace(editionName))
+            return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
+
+        var n = editionName.ToUpperInvariant();
+        if (n.Contains("HOME SINGLE", StringComparison.Ordinal) || n.Contains("SINGLE LANGUAGE", StringComparison.Ordinal))
+            return "7HNRX-D7KGG-3K4RQ-4WPJ4-YTDFH";
+        if (n.Contains("HOME", StringComparison.Ordinal) && !n.Contains("PRO", StringComparison.Ordinal))
+            return "TX9XD-98N7V-6WMQ6-BX7FG-H8Q99";
+        if (n.Contains("PRO N", StringComparison.Ordinal) || n.Contains("PRON", StringComparison.Ordinal))
+            return "2B87N-8KFHP-DKV6R-Y2CV8-8FFHB";
+        if (n.Contains("PRO", StringComparison.Ordinal))
+            return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
+        if (n.Contains("ENTERPRISE", StringComparison.Ordinal))
+            return "XFV79-B7DJ2-R6PXH-BQCQ3-8DF43";
+        if (n.Contains("EDUCATION", StringComparison.Ordinal))
+            return "YNXW8-VP64B-4MC7Y-7Y3VX-7R9W2";
+
+        return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
+    }
+
+    private static string EncodePasswordB64(string password) =>
+        Convert.ToBase64String(Encoding.Unicode.GetBytes(password));
 }

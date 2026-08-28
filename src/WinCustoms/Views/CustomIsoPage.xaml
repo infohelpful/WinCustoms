@@ -114,7 +114,7 @@
                             <StackPanel Grid.Column="0" Spacing="4">
                                 <TextBlock Text="2. 레지스트리 트윅" Style="{StaticResource SubtitleTextBlockStyle}" />
                                 <TextBlock Style="{StaticResource DescriptionTextStyle}"
-                                           Text="카테고리를 펼쳐 선택하세요. Action/커스텀 항목은 ISO 미지원입니다." />
+                                           Text="카테고리를 펼쳐 선택하세요. install.wim 오프라인 적용 + 설치 완료/첫 로그온 2차 적용. Action·커스텀 항목은 ISO 미지원입니다." />
                                 <TextBlock Text="{x:Bind ViewModel.TweaksSummary, Mode=OneWay}"
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -211,7 +211,11 @@
                             <StackPanel Grid.Column="0" Spacing="4">
                                 <TextBlock Text="3. 기본 앱 제거 (프로비저닝)" Style="{StaticResource SubtitleTextBlockStyle}" />
                                 <TextBlock Style="{StaticResource DescriptionTextStyle}"
-                                           Text="설치 이미지에 미리 들어 있는 앱을 제거합니다. 에디션에 없는 항목은 건너뜁니다." />
+                                           Text="install.wim 오프라인 제거 + 설치 완료(SetupComplete) 2차 정리 + 재설치 방지 레지스트리. 에디션에 없는 앱은 건너뜁니다." />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="※ 삭제된 앱, 특히 마이크로소프트 스토어 앱을 다시 설치하는 것은 어려울 수 있다는 점에 유의하십시오." />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
                                 <Button Content="추천 선택"
@@ -275,6 +279,12 @@
                     <StackPanel Spacing="12">
                         <TextBlock Text="4. 추가 옵션" Style="{StaticResource SubtitleTextBlockStyle}" />
 
+                        <TextBlock Text="무인 설치 (Setup)"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                                   TextWrapping="Wrap"
+                                   Text="선택한 에디션 기준으로 autounattend.xml 이 ISO에 포함됩니다. 라이선스·에디션·제품 키·언어는 자동, 설치 중 Windows Update 는 끔. 디스크/파티션 선택만 직접 하면 됩니다." />
+
                         <CheckBox IsChecked="{x:Bind ViewModel.BypassSetupRequirements, Mode=TwoWay}"
                                   IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}">
                             <StackPanel Spacing="2">
@@ -302,7 +312,7 @@
                                    Margin="0,8,0,0" />
                         <TextBlock Style="{StaticResource DescriptionTextStyle}"
                                    TextWrapping="Wrap"
-                                   Text="autounattend.xml과 이미지 레지스트리로, 파티션만 고르면 거의 바로 바탕화면까지 갑니다. (클린 설치 USB 부팅용)" />
+                                   Text="파티션 선택 후 설치가 끝나면 OOBE(계정·개인정보·진단)도 자동으로 건너뛰고 바탕화면까지 진행합니다. 25H2 에서 계정 화면이 뜨면 설치 중 인터넷을 끄세요." />
 
                         <CheckBox IsChecked="{x:Bind ViewModel.SkipOnlineAccount, Mode=TwoWay}"
                                   IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}">
@@ -315,6 +325,40 @@
                             </StackPanel>
                         </CheckBox>
 
+                        <StackPanel Spacing="8"
+                                    Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.ShowLocalAccountOptions), Mode=OneWay}">
+                            <TextBox Header="Windows 로컬 계정 이름"
+                                     PlaceholderText="비우면 계정은 만들지 않음 (예: admin)"
+                                     Text="{x:Bind ViewModel.LocalAccountName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     IsEnabled="{x:Bind ViewModel.CanEditLocalAccountOptions, Mode=OneWay}"
+                                     MaxLength="20" />
+                            <CheckBox IsChecked="{x:Bind ViewModel.EnableAutoLogon, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind ViewModel.CanEditLocalAccountOptions, Mode=OneWay}">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="자동 로그인"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock Style="{StaticResource DescriptionTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Text="켜면 입력한 비밀번호로 계정을 만들고 이후 부팅마다 자동 로그인합니다. 끄면 비밀번호 없이 계정만 만듭니다." />
+                                </StackPanel>
+                            </CheckBox>
+                            <PasswordBox x:Name="AutoLogonPasswordBox"
+                                         Header="로컬 계정 비밀번호"
+                                         PasswordChanged="AutoLogonPasswordBox_PasswordChanged"
+                                         Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.ShowAutoLogonPassword), Mode=OneWay}"
+                                         IsEnabled="{x:Bind ViewModel.CanEditLocalAccountOptions, Mode=OneWay}" />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.ShowAutoLogonPassword), Mode=OneWay}"
+                                       Text="자동 로그인을 켜면 입력한 비밀번호가 설치 시 적용되고, 이후 부팅마다 자동으로 로그인됩니다. ISO의 autounattend.xml에 Base64로 저장됩니다." />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.ShowManualPasswordHint), Mode=OneWay}"
+                                       Text="자동 로그인을 끄면 비밀번호 없이 로컬 계정이 만들어집니다. 설치 후 로그인 화면에서 암호 입력 없이 들어갈 수 있습니다." />
+                        </StackPanel>
+
                         <CheckBox IsChecked="{x:Bind ViewModel.SkipPrivacyExperience, Mode=TwoWay}"
                                   IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}">
                             <StackPanel Spacing="2">
@@ -325,16 +369,6 @@
                                            Text="위치·진단·맞춤형 환경 등 OOBE 개인정보 질문 화면을 건너뜁니다." />
                             </StackPanel>
                         </CheckBox>
-
-                        <TextBox Header="Windows 로컬 계정 이름"
-                                 PlaceholderText="비우면 계정은 만들지 않음 (예: admin)"
-                                 Text="{x:Bind ViewModel.LocalAccountName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}"
-                                 MaxLength="20" />
-                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap"
-                                   Text="이름을 넣으면 관리자 로컬 계정이 비밀번호 없이 만들어지고, 설치 직후 한 번 자동 로그인됩니다. 나중에 설정에서 암호를 추가하세요." />
                     </StackPanel>
                 </Border>
 

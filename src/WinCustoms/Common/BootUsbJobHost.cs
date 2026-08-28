@@ -164,6 +164,7 @@ public static class BootUsbJobHost
         SourceIsoPath = request.SourceIsoPath,
         OutputIsoPath = Path.Combine(request.WorkDirectory, "_unused.iso"),
         ImageIndex = request.ImageIndex <= 0 ? 1 : request.ImageIndex,
+        EditionName = request.EditionName ?? string.Empty,
         WorkDirectory = request.WorkDirectory,
         RegistryOperations = request.RegistryOperations,
         AppxPackageNames = request.AppxPackageNames,
@@ -172,6 +173,8 @@ public static class BootUsbJobHost
         SkipOnlineAccount = request.SkipOnlineAccount,
         SkipPrivacyExperience = request.SkipPrivacyExperience,
         LocalAccountName = request.LocalAccountName ?? string.Empty,
+        EnableAutoLogon = request.EnableAutoLogon,
+        LocalAccountPassword = request.LocalAccountPassword ?? string.Empty,
         ProgressFile = request.ProgressFile,
         ResultFile = request.ResultFile + ".iso-phase",
         CancelFile = request.CancelFile
@@ -492,6 +495,8 @@ public static class BootUsbJobHost
     {
         Robocopy(extractDir, volumes.DataRoot, request, "설치 파일");
 
+        var autounattend = Path.Combine(extractDir, "autounattend.xml");
+
         if (!string.IsNullOrWhiteSpace(volumes.EfiRoot))
         {
             Progress(request, 95, "EFI 파티션에 부팅 파일 복사...");
@@ -511,6 +516,13 @@ public static class BootUsbJobHost
                 var dest = Path.Combine(destDir, "boot.wim");
                 ClearReadOnly(bootWim);
                 File.Copy(bootWim, dest, overwrite: true);
+            }
+
+            // Rufus: PE 초기에 NTFS 를 못 읽을 때를 대비해 EFI 루트에도 autounattend
+            if (File.Exists(autounattend))
+            {
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "autounattend.xml"), overwrite: true);
+                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "Autounattend.xml"), overwrite: true);
             }
 
             // bootmgfw 경로 보강

@@ -1,3 +1,4 @@
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using WinCustoms.ViewModels;
@@ -12,6 +13,20 @@ public sealed partial class BootUsbPage : Page
     {
         ViewModel = App.GetService<BootUsbViewModel>();
         InitializeComponent();
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(BootUsbViewModel.ShowLocalAccountOptions)
+                && !ViewModel.ShowLocalAccountOptions)
+            {
+                AutoLogonPasswordBox.Password = string.Empty;
+            }
+        };
+    }
+
+    private void AutoLogonPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is PasswordBox box)
+            ViewModel.LocalAccountPassword = box.Password;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)

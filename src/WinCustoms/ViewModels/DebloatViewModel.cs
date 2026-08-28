@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinCustoms.Services;
@@ -13,6 +14,7 @@ public sealed partial class DebloatViewModel : ObservableObject
 {
     private readonly IAppxService _appx;
     private readonly IDialogService _dialog;
+    private readonly List<AppxPackageInfo> _allPackages = [];
 
     /// <summary>생성자에서 기본값을 넣는 동안에는 다시 읽어오지 않도록 하는 플래그.</summary>
     private readonly bool _initialized;
@@ -21,8 +23,7 @@ public sealed partial class DebloatViewModel : ObservableObject
     {
         _appx = appx;
         _dialog = dialog;
-
-        HideUninstalled = true;
+        ShowInstalledOnly = true;
         _initialized = true;
     }
 
@@ -34,21 +35,23 @@ public sealed partial class DebloatViewModel : ObservableObject
     [ObservableProperty]
     public partial string? StatusMessage { get; set; }
 
+    /// <summary>켜면 설치된 앱만 목록에 표시한다.</summary>
     [ObservableProperty]
-    public partial bool HideUninstalled { get; set; }
+    public partial bool ShowInstalledOnly { get; set; }
 
     /// <summary>목록이 비었을 때 안내 문구를 띄우기 위한 플래그.</summary>
     [ObservableProperty]
     public partial bool IsEmpty { get; set; }
 
-    public string EmptyMessage => HideUninstalled
-        ? "정리 대상으로 등록된 기본 앱이 이 PC 에는 설치되어 있지 않습니다. 아래 '설치되지 않은 항목도 표시'를 켜면 전체 목록을 볼 수 있습니다."
+    public string EmptyMessage => ShowInstalledOnly
+        ? "정리 대상으로 등록된 기본 앱이 이 PC 에는 설치되어 있지 않습니다. 오른쪽 '설치된 앱만 보기'를 끄면 전체 목록을 볼 수 있습니다."
         : "정리 대상 목록이 비어 있습니다.";
+
+    public string WarningNotice => "삭제된 앱, 특히 마이크로소프트 스토어 앱을 다시 설치하는 것은 어려울 수 있다는 점에 유의하십시오 .";
 
     public string Title => "기본 앱 정리";
 
-    public string Subtitle => "미리 설치된 앱을 선택해 제거합니다. 제거한 앱은 Microsoft Store 에서 다시 설치할 수 있지만 "
-                            + "자동으로 복구되지는 않으니 필요한 앱은 남겨 두세요.";
+    public string Subtitle => "미리 설치된 앱을 선택해 제거합니다. 삭제된 앱, 특히 마이크로소프트 스토어 앱을 다시 설치하는 것은 어려울 수 있다는 점에 유의하십시오 .";
 
     [RelayCommand]
     public async Task LoadAsync(CancellationToken ct)
@@ -60,14 +63,17 @@ public sealed partial class DebloatViewModel : ObservableObject
 
         try
         {
+            DetachPackageHandlers();
+            _allPackages.Clear();
+
             var packages = await _appx.LoadCatalogAsync(ct);
+            _allPackages.AddRange(packages);
+            AttachPackageHandlers();
 
-            Packages.Clear();
-            foreach (var package in packages.Where(p => !HideUninstalled || p.IsInstalled))
-                Packages.Add(package);
+            ApplyFilter();
 
-            var installedCount = packages.Count(p => p.IsInstalled);
-            StatusMessage = $"정리 대상 {packages.Count}개 중 {installedCount}개가 이 PC 에 설치되어 있습니다.";
+            var installedCount = _allPackages.Count(p => p.IsInstalled);
+            StatusMessage = $"정리 대상 {_allPackages.Count}개 중 {installedCount}개가 이 PC 에 설치되어 있습니다.";
         }
         catch (Exception ex)
         {
@@ -75,15 +81,13 @@ public sealed partial class DebloatViewModel : ObservableObject
         }
         finally
         {
-            IsEmpty = Packages.Count == 0;
-            OnPropertyChanged(nameof(EmptyMessage));
             IsBusy = false;
         }
     }
 
-    partial void OnHideUninstalledChanged(bool value)
+    partial void OnShowInstalledOnlyChanged(bool value)
     {
-        if (_initialized) _ = LoadAsync(CancellationToken.None);
+        if (_initialized) ApplyFilter();
     }
 
     [RelayCommand]
@@ -98,7 +102,7 @@ public sealed partial class DebloatViewModel : ObservableObject
     [RelayCommand]
     private void ClearSelection()
     {
-        foreach (var package in Packages)
+        foreach (var package in _allPackages)
             package.IsSelected = false;
 
         StatusMessage = null;
@@ -109,7 +113,7 @@ public sealed partial class DebloatViewModel : ObservableObject
     {
         if (IsBusy) return;
 
-        var targets = Packages.Where(p => p.IsSelected && p.IsInstalled).ToList();
+        var targets = _allPackages.Where(p => p.IsSelected && p.IsInstalled).ToList();
         if (targets.Count == 0)
         {
             StatusMessage = "제거할 앱을 선택하세요.";
@@ -119,7 +123,7 @@ public sealed partial class DebloatViewModel : ObservableObject
         var names = string.Join("\n· ", targets.Select(t => t.DisplayName));
         var confirmed = await _dialog.ConfirmAsync(
             $"{targets.Count}개 앱을 제거할까요?",
-            $"· {names}\n\n현재 사용자 계정에서 제거됩니다. 되돌리려면 Microsoft Store 에서 직접 다시 설치해야 합니다.",
+            $"· {names}\n\n{WarningNotice}\n\n모든 사용자 계정과 프로비저닝(재설치) 목록에서 제거를 시도합니다.",
             "제거");
 
         if (!confirmed) return;
@@ -142,12 +146,10 @@ public sealed partial class DebloatViewModel : ObservableObject
                 {
                     await _appx.RemoveAsync(package, ct);
                     package.IsSelected = false;
-                    removed++;
                 }
                 catch (Exception ex)
                 {
                     package.LastError = ex.Message;
-                    failed.Add(package.DisplayName);
                 }
                 finally
                 {
@@ -155,15 +157,35 @@ public sealed partial class DebloatViewModel : ObservableObject
                 }
             }
 
+            StatusMessage = "설치 상태 새로고침 중...";
+            await _appx.RefreshInstalledStateAsync(_allPackages, ct);
+            ApplyFilter();
+
+            // 최종 실제 설치 상태 기준으로 성공/실패 정확히 판별
+            foreach (var target in targets)
+            {
+                if (!target.IsInstalled)
+                {
+                    target.IsSelected = false;
+                    target.LastError = null;
+                    removed++;
+                }
+                else
+                {
+                    failed.Add(target.DisplayName);
+                }
+            }
+
+            var installedCount = _allPackages.Count(p => p.IsInstalled);
             StatusMessage = failed.Count == 0
-                ? $"{removed}개 앱을 제거했습니다."
-                : $"{removed}개 제거 · {failed.Count}개 실패";
+                ? $"{removed}개 앱을 제거했습니다. (현재 설치된 기본 앱: {installedCount}개)"
+                : $"{removed}개 제거 · {failed.Count}개 실패 (현재 설치된 기본 앱: {installedCount}개)";
 
             if (failed.Count > 0)
             {
                 await _dialog.ShowMessageAsync(
                     "일부 앱을 제거하지 못했습니다",
-                    "시스템에서 보호하는 앱이거나 다른 사용자 계정에 설치된 경우일 수 있습니다.\n\n· "
+                    "시스템에서 보호하는 앱이거나 Windows Update 로 다시 깔리는 경우일 수 있습니다.\n\n· "
                     + string.Join("\n· ", failed));
             }
         }
@@ -180,4 +202,32 @@ public sealed partial class DebloatViewModel : ObservableObject
     [RelayCommand]
     private Task OpenStoreAsync(AppxPackageInfo? package)
         => package is null ? Task.CompletedTask : _appx.OpenStoreAsync(package);
+
+    private void ApplyFilter()
+    {
+        Packages.Clear();
+        foreach (var package in _allPackages.Where(p => !ShowInstalledOnly || p.IsInstalled))
+            Packages.Add(package);
+
+        IsEmpty = Packages.Count == 0;
+        OnPropertyChanged(nameof(EmptyMessage));
+    }
+
+    private void AttachPackageHandlers()
+    {
+        foreach (var package in _allPackages)
+            package.PropertyChanged += OnPackagePropertyChanged;
+    }
+
+    private void DetachPackageHandlers()
+    {
+        foreach (var package in _allPackages)
+            package.PropertyChanged -= OnPackagePropertyChanged;
+    }
+
+    private void OnPackagePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(AppxPackageInfo.IsInstalled))
+            ApplyFilter();
+    }
 }

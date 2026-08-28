@@ -151,6 +151,40 @@ public sealed partial class BootUsbViewModel : ObservableObject
     public partial string LocalAccountName { get; set; }
 
     [ObservableProperty]
+    public partial bool EnableAutoLogon { get; set; }
+
+    [ObservableProperty]
+    public partial string LocalAccountPassword { get; set; } = string.Empty;
+
+    public bool ShowLocalAccountOptions => SkipOnlineAccount;
+    public bool CanEditLocalAccountOptions => SkipOnlineAccount && !IsBusy;
+    public bool ShowAutoLogonPassword => SkipOnlineAccount && EnableAutoLogon;
+    public bool ShowManualPasswordHint => SkipOnlineAccount && !EnableAutoLogon;
+
+    partial void OnSkipOnlineAccountChanged(bool value)
+    {
+        if (!value)
+        {
+            EnableAutoLogon = false;
+            LocalAccountPassword = string.Empty;
+        }
+
+        NotifyLocalAccountUi();
+    }
+
+    partial void OnEnableAutoLogonChanged(bool value) => NotifyLocalAccountUi();
+
+    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(CanEditLocalAccountOptions));
+
+    private void NotifyLocalAccountUi()
+    {
+        OnPropertyChanged(nameof(ShowLocalAccountOptions));
+        OnPropertyChanged(nameof(CanEditLocalAccountOptions));
+        OnPropertyChanged(nameof(ShowAutoLogonPassword));
+        OnPropertyChanged(nameof(ShowManualPasswordHint));
+    }
+
+    [ObservableProperty]
     public partial bool IsDebloatExpanded { get; set; }
 
     [ObservableProperty]
@@ -512,13 +546,23 @@ public sealed partial class BootUsbViewModel : ObservableObject
         }
 
         var optimize = ShowOptimizationOptions;
-        var localName = optimize ? (LocalAccountName ?? string.Empty).Trim() : string.Empty;
-        if (optimize)
+        var localName = optimize && SkipOnlineAccount
+            ? (LocalAccountName ?? string.Empty).Trim()
+            : string.Empty;
+        if (optimize && SkipOnlineAccount)
         {
             var accountError = CustomIsoUnattend.ValidateAccountName(localName);
             if (accountError is not null)
             {
                 await _dialog.ShowMessageAsync("계정 이름", accountError);
+                return;
+            }
+
+            var autoLogonError = CustomIsoUnattend.ValidateAutoLogon(
+                localName, EnableAutoLogon, LocalAccountPassword);
+            if (autoLogonError is not null)
+            {
+                await _dialog.ShowMessageAsync("자동 로그인", autoLogonError);
                 return;
             }
         }
@@ -535,6 +579,9 @@ public sealed partial class BootUsbViewModel : ObservableObject
         var applyDrivers = optimize && InjectHostDrivers;
         var applySkipAccount = optimize && SkipOnlineAccount;
         var applySkipPrivacy = optimize && SkipPrivacyExperience;
+        var applyAutoLogon = optimize && SkipOnlineAccount && EnableAutoLogon;
+        var accountPassword = applyAutoLogon ? LocalAccountPassword : string.Empty;
+        var effectiveLocalName = applySkipAccount ? localName : string.Empty;
 
         // install.wim 을 마운트해서 손볼 때만 에디션이 필요. 순정 구우면 설치 화면에서 고르면 됨.
         var needsEdition = selectedTweaks.Count > 0
@@ -543,7 +590,8 @@ public sealed partial class BootUsbViewModel : ObservableObject
                            || applyDrivers
                            || applySkipAccount
                            || applySkipPrivacy
-                           || localName.Length > 0;
+                           || applyAutoLogon
+                           || effectiveLocalName.Length > 0;
 
         WindowsImageInfo? edition = SelectedEdition;
         if (needsEdition)
@@ -586,6 +634,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
         {
             SourceIsoPath = SourceIsoPath,
             ImageIndex = imageIndex,
+            EditionName = edition?.Name ?? string.Empty,
             DiskNumber = SelectedDisk.Number,
             DiskFriendlyName = SelectedDisk.FriendlyName,
             DiskSizeBytes = SelectedDisk.SizeBytes,
@@ -599,7 +648,9 @@ public sealed partial class BootUsbViewModel : ObservableObject
             InjectHostDrivers = applyDrivers,
             SkipOnlineAccount = applySkipAccount,
             SkipPrivacyExperience = applySkipPrivacy,
-            LocalAccountName = localName
+            LocalAccountName = effectiveLocalName,
+            EnableAutoLogon = applyAutoLogon,
+            LocalAccountPassword = accountPassword
         };
 
         await RunBusyAsync(async (progress, ct) =>

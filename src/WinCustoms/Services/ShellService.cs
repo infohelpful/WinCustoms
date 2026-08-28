@@ -6,7 +6,22 @@ namespace WinCustoms.Services;
 public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
 {
     public bool Succeeded => ExitCode == 0;
-    public string Combined => string.IsNullOrWhiteSpace(StandardError) ? StandardOutput : StandardError;
+
+    /// <summary>stdout+stderr 합본. stderr 만 있으면 stdout 성공 문구를 놓쳐 설치 실패로 오인한다.</summary>
+    public string Combined
+    {
+        get
+        {
+            var outEmpty = string.IsNullOrWhiteSpace(StandardOutput);
+            var errEmpty = string.IsNullOrWhiteSpace(StandardError);
+            if (outEmpty && errEmpty) return string.Empty;
+            if (outEmpty) return StandardError;
+            if (errEmpty) return StandardOutput;
+            if (string.Equals(StandardOutput, StandardError, StringComparison.Ordinal))
+                return StandardOutput;
+            return StandardOutput.TrimEnd() + Environment.NewLine + StandardError.TrimEnd();
+        }
+    }
 }
 
 public interface IShellService

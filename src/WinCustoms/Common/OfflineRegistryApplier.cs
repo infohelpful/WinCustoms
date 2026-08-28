@@ -30,6 +30,8 @@ public static class OfflineRegistryApplier
         var loadedSoft = false;
         var loadedSys = false;
         var loadedUser = false;
+        var ok = 0;
+        var fail = 0;
 
         try
         {
@@ -45,13 +47,17 @@ public static class OfflineRegistryApplier
                 try
                 {
                     ApplyOne(op);
-                    log?.Invoke($"REG {op}");
+                    ok++;
+                    log?.Invoke($"REG OK {op}");
                 }
                 catch (Exception ex)
                 {
-                    log?.Invoke($"REG 실패 {op}: {ex.Message}");
+                    fail++;
+                    log?.Invoke($"REG FAIL {op}: {ex.Message}");
                 }
             }
+
+            log?.Invoke($"REG 요약: 성공 {ok} · 실패 {fail}");
         }
         finally
         {

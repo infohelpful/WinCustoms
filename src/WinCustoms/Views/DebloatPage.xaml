@@ -16,9 +16,31 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="24,16,24,12" Spacing="2">
-            <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="{x:Bind ViewModel.Title}" />
-            <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{x:Bind ViewModel.Subtitle}" />
+        <StackPanel Grid.Row="0" Margin="24,16,24,12" Spacing="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Style="{StaticResource PageTitleTextStyle}"
+                           Text="{x:Bind ViewModel.Title}"
+                           VerticalAlignment="Center" />
+
+                <ToggleSwitch Grid.Column="1"
+                              Margin="0"
+                              MinWidth="0"
+                              VerticalAlignment="Center"
+                              OffContent="설치된 앱만 보기"
+                              OnContent="설치된 앱만 보기"
+                              IsOn="{x:Bind ViewModel.ShowInstalledOnly, Mode=TwoWay}"
+                              IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}" />
+            </Grid>
+
+            <TextBlock Style="{StaticResource PageSubtitleTextStyle}"
+                       Text="{x:Bind ViewModel.Subtitle}"
+                       TextWrapping="Wrap" />
         </StackPanel>
 
         <InfoBar Grid.Row="1"
@@ -41,7 +63,9 @@
 
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="services:AppxPackageInfo">
-                        <Border Style="{StaticResource TweakCardStyle}" Padding="12">
+                        <Border Style="{StaticResource TweakCardStyle}"
+                                Padding="12"
+                                Opacity="{x:Bind views:XamlHelpers.InstalledCardOpacity(IsInstalled), Mode=OneWay}">
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
@@ -114,11 +138,7 @@
                                   Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsBusy), Mode=OneWay}"
                                   Width="20" Height="20" VerticalAlignment="Center" />
 
-                    <CheckBox Content="설치되지 않은 항목도 표시"
-                              VerticalAlignment="Center"
-                              IsChecked="{x:Bind views:XamlHelpers.Not(ViewModel.HideUninstalled), Mode=OneWay}"
-                              Click="OnShowAllClick" />
-
+                    <Button Content="새로고침" Command="{x:Bind ViewModel.LoadCommand}" />
                     <Button Content="선택 해제" Command="{x:Bind ViewModel.ClearSelectionCommand}" />
                     <Button Content="권장 항목 선택" Command="{x:Bind ViewModel.SelectRecommendedCommand}" />
                     <Button Content="선택 항목 제거"
