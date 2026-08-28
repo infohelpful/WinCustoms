@@ -257,13 +257,13 @@ internal static class CustomIsoUnattend
 
         if (hasAccount)
         {
+            var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
             if (useAutoLogon)
             {
-                var passwordB64 = EncodePasswordB64(request.LocalAccountPassword);
                 sb.AppendLine("""      <AutoLogon>""");
                 sb.AppendLine("""        <Password>""");
-                sb.AppendLine($"          <Value>{passwordB64}</Value>");
-                sb.AppendLine("""          <PlainText>false</PlainText>""");
+                sb.AppendLine($"          <Value>{pwdEsc}</Value>");
+                sb.AppendLine("""          <PlainText>true</PlainText>""");
                 sb.AppendLine("""        </Password>""");
                 sb.AppendLine("""        <Enabled>true</Enabled>""");
                 sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
@@ -278,16 +278,8 @@ internal static class CustomIsoUnattend
             sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
             sb.AppendLine("""            <Group>Administrators</Group>""");
             sb.AppendLine("""            <Password>""");
-            if (useAutoLogon)
-            {
-                sb.AppendLine($"              <Value>{EncodePasswordB64(request.LocalAccountPassword)}</Value>");
-                sb.AppendLine("""              <PlainText>false</PlainText>""");
-            }
-            else
-            {
-                sb.AppendLine("""              <Value></Value>""");
-                sb.AppendLine("""              <PlainText>true</PlainText>""");
-            }
+            sb.AppendLine($"              <Value>{pwdEsc}</Value>");
+            sb.AppendLine("""              <PlainText>true</PlainText>""");
             sb.AppendLine("""            </Password>""");
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
@@ -357,12 +349,48 @@ internal static class CustomIsoUnattend
 
     private static LocaleSettings ResolveLocale(string extractDir, string editionName)
     {
-        var lang = DetectUiLanguage(extractDir) ?? GuessLanguageFromEdition(editionName);
+        var lang = DetectUiLanguage(extractDir) 
+                   ?? GuessLanguageFromEdition(editionName)
+                   ?? System.Globalization.CultureInfo.CurrentUICulture.Name;
         return MapLocale(lang);
     }
 
     private static string? DetectUiLanguage(string extractDir)
     {
+        // 1. sources\lang.ini 확인 (가장 빠르고 정확함)
+        try
+        {
+            var langIni = Path.Combine(extractDir, "sources", "lang.ini");
+            if (File.Exists(langIni))
+            {
+                var lines = File.ReadAllLines(langIni);
+                var inSection = false;
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("[Available UI Languages]", StringComparison.OrdinalIgnoreCase))
+                    {
+                        inSection = true;
+                        continue;
+                    }
+                    if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                    {
+                        inSection = false;
+                        continue;
+                    }
+                    if (inSection && trimmed.Contains('='))
+                    {
+                        var parts = trimmed.Split('=');
+                        var langCode = parts[0].Trim();
+                        if (langCode.Length >= 2)
+                            return langCode;
+                    }
+                }
+            }
+        }
+        catch { /* ignore */ }
+
+        // 2. boot.wim DISM 검사
         var bootWim = Path.Combine(extractDir, "sources", "boot.wim");
         if (!File.Exists(bootWim))
             return null;
@@ -406,7 +434,10 @@ internal static class CustomIsoUnattend
             foreach (var rawLine in output.Split('\n'))
             {
                 var line = rawLine.Trim();
-                if (!line.Contains("Default Language", StringComparison.OrdinalIgnoreCase))
+                if (!line.Contains("Default Language", StringComparison.OrdinalIgnoreCase)
+                    && !line.Contains("기본 언어", StringComparison.OrdinalIgnoreCase)
+                    && !line.Contains("Language", StringComparison.OrdinalIgnoreCase)
+                    && !line.Contains("언어", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 var colon = line.IndexOf(':');
@@ -414,7 +445,7 @@ internal static class CustomIsoUnattend
                     continue;
 
                 var lang = line[(colon + 1)..].Trim();
-                if (lang.Length >= 2)
+                if (lang.Length >= 2 && !lang.Contains(' ') && !lang.Contains(':'))
                     return lang;
             }
         }
@@ -422,14 +453,22 @@ internal static class CustomIsoUnattend
         return null;
     }
 
-    private static string GuessLanguageFromEdition(string editionName)
+    private static string? GuessLanguageFromEdition(string editionName)
     {
+        if (string.IsNullOrWhiteSpace(editionName))
+            return null;
+
         if (editionName.Contains("Korean", StringComparison.OrdinalIgnoreCase)
             || editionName.Contains("한국", StringComparison.OrdinalIgnoreCase)
-            || editionName.Contains("대한민국", StringComparison.OrdinalIgnoreCase))
+            || editionName.Contains("대한민국", StringComparison.OrdinalIgnoreCase)
+            || editionName.Contains("ko-KR", StringComparison.OrdinalIgnoreCase))
             return "ko-KR";
 
-        return "en-US";
+        if (editionName.Contains("English", StringComparison.OrdinalIgnoreCase)
+            || editionName.Contains("en-US", StringComparison.OrdinalIgnoreCase))
+            return "en-US";
+
+        return null;
     }
 
     private static LocaleSettings MapLocale(string lang)
@@ -437,6 +476,15 @@ internal static class CustomIsoUnattend
         var normalized = lang.Replace('_', '-');
         if (normalized.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
             return new LocaleSettings("ko-KR", "0412:00000412", "ko-KR", "ko-KR");
+
+        if (normalized.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+            return new LocaleSettings("ja-JP", "0411:00000411", "ja-JP", "ja-JP");
+
+        if (normalized.StartsWith("zh-CN", StringComparison.OrdinalIgnoreCase) || normalized.StartsWith("zh-Hans", StringComparison.OrdinalIgnoreCase))
+            return new LocaleSettings("zh-CN", "0804:00000804", "zh-CN", "zh-CN");
+
+        if (normalized.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase) || normalized.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase))
+            return new LocaleSettings("zh-TW", "0404:00000404", "zh-TW", "zh-TW");
 
         return new LocaleSettings("en-US", "0409:00000409", "en-US", "en-US");
     }
@@ -463,7 +511,4 @@ internal static class CustomIsoUnattend
 
         return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
     }
-
-    private static string EncodePasswordB64(string password) =>
-        Convert.ToBase64String(Encoding.Unicode.GetBytes(password));
 }

@@ -267,13 +267,25 @@
                                 <ItemsControl ItemsSource="{x:Bind ViewModel.DebloatPackages, Mode=OneWay}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="services:AppxPackageInfo">
-                                            <Grid ColumnSpacing="8" Padding="2,1">
+                                            <Grid ColumnSpacing="8" Padding="2,2">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <CheckBox Grid.Column="0" MinWidth="0" IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
-                                                <TextBlock Grid.Column="1" Text="{x:Bind DisplayName}" VerticalAlignment="Center" />
+                                                <CheckBox Grid.Column="0" MinWidth="0" VerticalAlignment="Center" IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
+                                                <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind DisplayName}" Style="{StaticResource BodyTextBlockStyle}" />
+                                                    <TextBlock Text="{x:Bind Description}" Style="{StaticResource CaptionTextBlockStyle}"
+                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <Border Grid.Column="2"
+                                                        Style="{StaticResource BadgeBorderStyle}"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{x:Bind views:XamlHelpers.Show(RecommendedForRemoval)}">
+                                                    <TextBlock Style="{StaticResource BadgeTextStyle}" Text="제거 권장" />
+                                                </Border>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>

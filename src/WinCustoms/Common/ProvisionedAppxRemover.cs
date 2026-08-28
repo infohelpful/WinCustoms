@@ -42,9 +42,12 @@ internal static class ProvisionedAppxRemover
                     if ($Name.StartsWith($w + '~~~~', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                     if ($cap.Equals($w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                     if ($cap.EndsWith('.' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-                    if ($w.EndsWith('.' + $cap, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-                    if ($cap -like "*$w*" -or $w -like "*$cap*") { return $true }
-                    if ($Name -like "*$w*") { return $true }
+                    if ($cap.StartsWith($w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($cap.StartsWith($w + '-', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($cap.EndsWith('-' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.Contains('.' + $w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.EndsWith('.' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.StartsWith($w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                 }
                 return $false
             }
@@ -207,9 +210,12 @@ internal static class ProvisionedAppxRemover
                     if ($Name.StartsWith($w + '~~~~', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                     if ($cap.Equals($w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                     if ($cap.EndsWith('.' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-                    if ($w.EndsWith('.' + $cap, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-                    if ($cap -like "*$w*" -or $w -like "*$cap*") { return $true }
-                    if ($Name -like "*$w*") { return $true }
+                    if ($cap.StartsWith($w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($cap.StartsWith($w + '-', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($cap.EndsWith('-' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.Contains('.' + $w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.EndsWith('.' + $w, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+                    if ($Name.StartsWith($w + '.', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
                 }
                 return $false
             }

@@ -140,25 +140,15 @@ public sealed partial class TweakCatalog
     /// <summary>Windows Terminal 이 있으면 wt.exe, 없으면 powershell.exe 를 사용한다.</summary>
     private static (string Label, string Command, string BackgroundCommand, string Icon) ResolveTerminalCommand()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var wt = Path.Combine(localAppData, @"Microsoft\WindowsApps\wt.exe");
+        // wt.exe 는 Windows 10/11 기본 앱 실행 별칭에 등록되어 있으며 모든 사용자 환경에서 동작한다.
+        const string wtCommand = @"wt.exe -d ""%V""";
+        const string wtIcon = @"wt.exe";
 
-        if (File.Exists(wt))
-        {
-            return (
-                "여기서 터미널 열기(&W)",
-                $@"""{wt}"" -d ""%V""",
-                $@"""{wt}"" -d ""%V""",
-                wt);
-        }
-
-        var powershell = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System),
-            @"WindowsPowerShell\v1.0\powershell.exe");
-
-        // %V 는 폴더 자체와 폴더 배경 모두에서 올바른 경로로 확장된다.
-        var command = $@"""{powershell}"" -NoExit -Command ""Set-Location -LiteralPath '%V'""";
-        return ("여기서 PowerShell 열기(&W)", command, command, powershell);
+        return (
+            "여기서 터미널 열기(&W)",
+            wtCommand,
+            wtCommand,
+            wtIcon);
     }
 
     // ── 스펙 작성용 짧은 헬퍼 ────────────────────────────────────
