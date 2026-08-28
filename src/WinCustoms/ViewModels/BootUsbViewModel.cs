@@ -583,33 +583,9 @@ public sealed partial class BootUsbViewModel : ObservableObject
         var accountPassword = applyAutoLogon ? LocalAccountPassword : string.Empty;
         var effectiveLocalName = applySkipAccount ? localName : string.Empty;
 
-        // install.wim 을 마운트해서 손볼 때만 에디션이 필요. 순정 구우면 설치 화면에서 고르면 됨.
-        var needsEdition = selectedTweaks.Count > 0
-                           || appNames.Count > 0
-                           || applyBypass
-                           || applyDrivers
-                           || applySkipAccount
-                           || applySkipPrivacy
-                           || applyAutoLogon
-                           || effectiveLocalName.Length > 0;
-
+        // 에디션을 선택하지 않은 경우(순정 그대로 / 설치 시 선택)는 null 유지.
+        // 특정 에디션을 선택한 경우에만 해당 에디션의 키를 주입해 에디션 선택창을 건너뜀.
         WindowsImageInfo? edition = SelectedEdition;
-        if (needsEdition)
-        {
-            edition ??= Editions.FirstOrDefault(e =>
-                            e.Name.Contains("Pro", StringComparison.OrdinalIgnoreCase))
-                        ?? Editions.FirstOrDefault();
-            if (edition is null)
-            {
-                StatusMessage = "트윅·옵션 적용을 위해 ISO 에디션 목록을 먼저 읽으세요.";
-                await _dialog.ShowMessageAsync(
-                    "에디션 필요",
-                    "최적화 설정(트윅·앱 제거·추가 옵션)을 쓸 때는 적용할 에디션이 필요합니다.\n\n"
-                    + "ISO를 고른 뒤 에디션 목록이 채워졌는지 확인하거나, 순정만 구울 거면 「최적화 설정」을 끄세요.");
-                return;
-            }
-        }
-
         var imageIndex = edition?.Index ?? 1;
 
         var confirmed = await _dialog.ConfirmAsync(
@@ -618,8 +594,8 @@ public sealed partial class BootUsbViewModel : ObservableObject
             + $"장치: {SelectedDisk.DisplayText}\n"
             + $"ISO: {SourceIsoPath}\n"
             + (edition is not null
-                ? $"에디션: {edition.DisplayText}\n"
-                : "에디션: 순정 그대로(설치 시 선택)\n")
+                ? $"에디션: {edition.DisplayText} (설치 시 자동 선택)\n"
+                : "에디션: 순정 그대로 (설치 화면에서 선택)\n")
             + $"모드: {(optimize ? "최적화 설정 적용" : "순정 그대로")}\n"
             + $"파티션: {SelectedPartitionSchemeOption} · {TargetSystemText}\n"
             + $"파일 시스템: {SelectedFileSystemOption} · 레이블: {VolumeLabel}\n\n"
