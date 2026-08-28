@@ -71,6 +71,25 @@ internal static class CustomIsoUnattend
         var path = Path.Combine(extractDir, "autounattend.xml");
         var xml = BuildXml(extractDir, request);
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        // sources\pid.txt 및 sources\ei.cfg 자동 생성
+        // Windows 설치 마법사가 부팅 시 제품키/에디션 선택 화면을 100% 무조건 건너뛰도록 강제
+        var editionName = (request.EditionName ?? string.Empty).Trim();
+        var productKey = ResolveGenericProductKey(editionName);
+        var sourcesDir = Path.Combine(extractDir, "sources");
+        if (Directory.Exists(sourcesDir))
+        {
+            if (!string.IsNullOrEmpty(productKey))
+            {
+                var pidPath = Path.Combine(sourcesDir, "pid.txt");
+                var pidContent = $"[PID]\r\nValue={productKey}\r\n";
+                File.WriteAllText(pidPath, pidContent, Encoding.ASCII);
+            }
+
+            var eiPath = Path.Combine(sourcesDir, "ei.cfg");
+            var eiContent = "[Channel]\r\n_Default\r\n[VL]\r\n0\r\n";
+            File.WriteAllText(eiPath, eiContent, Encoding.ASCII);
+        }
     }
 
     /// <summary>
@@ -180,6 +199,7 @@ internal static class CustomIsoUnattend
         {
             sb.AppendLine("""        <ProductKey>""");
             sb.AppendLine($"          <Key>{productKey}</Key>");
+            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
             sb.AppendLine("""        </ProductKey>""");
         }
         sb.AppendLine("""      </UserData>""");
