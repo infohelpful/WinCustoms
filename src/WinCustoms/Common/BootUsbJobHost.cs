@@ -190,8 +190,7 @@ public static class BootUsbJobHost
         var label = SanitizeLabel(request.VolumeLabel);
         var fs = request.FileSystem == BootUsbFileSystem.Ntfs ? "NTFS" : "FAT32";
         var style = request.PartitionScheme == BootUsbPartitionScheme.Gpt ? "GPT" : "MBR";
-        var dual = request.PartitionScheme == BootUsbPartitionScheme.Gpt
-                   && request.FileSystem == BootUsbFileSystem.Ntfs;
+        var dual = request.PartitionScheme == BootUsbPartitionScheme.Gpt;
         var letter1 = FindFreeDriveLetter();
         var letter2 = FindFreeDriveLetter(exclude: letter1);
         var cluster = request.ClusterSizeBytes > 0 ? request.ClusterSizeBytes : 0;
@@ -365,7 +364,7 @@ public static class BootUsbJobHost
                 }
                 else {
                   if ($want -eq 'MBR') { $part = New-Partition -DiskNumber $n -UseMaximumSize -IsActive }
-                  else { $part = New-Partition -DiskNumber $n -UseMaximumSize }
+                  else { $part = New-Partition -DiskNumber $n -UseMaximumSize -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' }
                   Format-PartNoLetter $part $fs $label
                   $dL = Assign-Letter $part $L1
                   $dRoot = $dL + ':\'
