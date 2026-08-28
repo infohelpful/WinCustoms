@@ -73,17 +73,23 @@ internal static class CustomIsoUnattend
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
         // sources\pid.txt 및 sources\ei.cfg 자동 생성
-        // Windows 설치 마법사가 부팅 시 제품키/에디션 선택 화면을 100% 무조건 건너뛰도록 강제
+        // 1. ei.cfg: 제품키 입력 화면을 100% 무조건 건너뛰도록 처리
+        // 2. pid.txt: 에디션을 선택한 경우에만 해당 에디션 키를 주입하여 에디션 선택 화면까지 건너뛰고 직행.
+        //    에디션을 선택하지 않은 경우 pid.txt를 비워두어 에디션 선택 화면이 정상 표시되도록 함.
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var productKey = ResolveGenericProductKey(editionName);
         var sourcesDir = Path.Combine(extractDir, "sources");
         if (Directory.Exists(sourcesDir))
         {
+            var pidPath = Path.Combine(sourcesDir, "pid.txt");
             if (!string.IsNullOrEmpty(productKey))
             {
-                var pidPath = Path.Combine(sourcesDir, "pid.txt");
                 var pidContent = $"[PID]\r\nValue={productKey}\r\n";
                 File.WriteAllText(pidPath, pidContent, Encoding.ASCII);
+            }
+            else if (File.Exists(pidPath))
+            {
+                try { File.Delete(pidPath); } catch { /* ignore */ }
             }
 
             var eiPath = Path.Combine(sourcesDir, "ei.cfg");
@@ -490,11 +496,11 @@ internal static class CustomIsoUnattend
         return new LocaleSettings("en-US", "0409:00000409", "en-US", "en-US");
     }
 
-    /// <summary>Windows 11 GVLK — 에디션 이름으로 추론(Rufus wue.c 와 동일 순서).</summary>
-    private static string ResolveGenericProductKey(string editionName)
+    /// <summary>Windows 11 GVLK — 에디션 이름으로 추론(Rufus wue.c 와 동일 순서). 에디션 미선택 시 null.</summary>
+    private static string? ResolveGenericProductKey(string editionName)
     {
         if (string.IsNullOrWhiteSpace(editionName))
-            return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
+            return null;
 
         var n = editionName.ToUpperInvariant();
         if (n.Contains("HOME SINGLE", StringComparison.Ordinal) || n.Contains("SINGLE LANGUAGE", StringComparison.Ordinal))
@@ -510,6 +516,6 @@ internal static class CustomIsoUnattend
         if (n.Contains("EDUCATION", StringComparison.Ordinal))
             return "YNXW8-VP64B-4MC7Y-7Y3VX-7R9W2";
 
-        return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
+        return null;
     }
 }
