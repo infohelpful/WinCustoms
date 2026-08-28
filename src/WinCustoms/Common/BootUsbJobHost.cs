@@ -538,16 +538,13 @@ public static class BootUsbJobHost
                 }
             }
 
-            // bootmgfw 경로 보강
+            // bootmgfw 경로 보강: bootmgfw.efi 를 bootx64.efi 로 복사하여 순수 UEFI Boot Manager 실행 보장
+            var mgfw = Path.Combine(volumes.EfiRoot, "efi", "microsoft", "boot", "bootmgfw.efi");
             var bootx64 = Path.Combine(volumes.EfiRoot, "efi", "boot", "bootx64.efi");
-            if (!File.Exists(bootx64))
+            if (File.Exists(mgfw))
             {
-                var mgfw = Path.Combine(volumes.EfiRoot, "efi", "microsoft", "boot", "bootmgfw.efi");
-                if (File.Exists(mgfw))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(bootx64)!);
-                    File.Copy(mgfw, bootx64, overwrite: true);
-                }
+                Directory.CreateDirectory(Path.GetDirectoryName(bootx64)!);
+                File.Copy(mgfw, bootx64, overwrite: true);
             }
         }
 
