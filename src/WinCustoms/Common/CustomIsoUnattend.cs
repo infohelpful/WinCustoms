@@ -87,10 +87,12 @@ internal static class CustomIsoUnattend
         }
 
         // sources\pid.txt 및 sources\ei.cfg 처리
-        // 에디션을 선택한 경우: pid.txt 로만 제품키를 주입 (XML 안의 ProductKey 와 이중 충돌 방지)
-        // 에디션을 선택하지 않은 경우: pid.txt 삭제 및 ei.cfg 로 제품키 입력창만 건너뛰고 에디션 목록 표시
+        // 에디션을 선택한 경우: pid.txt (범용 키) + ei.cfg (EditionID + Retail) 함께 작성하여 메인보드 OEM 키 무시 및 에디션 즉시 자동 선택
+        // 에디션을 선택하지 않은 경우: pid.txt 삭제 + ei.cfg (Retail) 로 제품키 입력창만 넘어가고 에디션 선택 목록 표출
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var productKey = ResolveGenericProductKey(editionName);
+        var editionId = ResolveEditionId(editionName);
+
         if (Directory.Exists(sourcesDir))
         {
             var pidPath = Path.Combine(sourcesDir, "pid.txt");
@@ -99,10 +101,10 @@ internal static class CustomIsoUnattend
             if (!string.IsNullOrEmpty(productKey))
             {
                 File.WriteAllText(pidPath, $"[PID]\r\nValue={productKey}\r\n", Encoding.ASCII);
-                if (File.Exists(eiPath))
-                {
-                    try { File.Delete(eiPath); } catch { /* ignore */ }
-                }
+                var eiContent = !string.IsNullOrEmpty(editionId)
+                    ? $"[EditionID]\r\n{editionId}\r\n[Channel]\r\nRetail\r\n[VL]\r\n0\r\n"
+                    : "[Channel]\r\nRetail\r\n[VL]\r\n0\r\n";
+                File.WriteAllText(eiPath, eiContent, Encoding.ASCII);
             }
             else
             {
@@ -513,15 +515,17 @@ internal static class CustomIsoUnattend
         var n = editionName.ToUpperInvariant();
         if (n.Contains("HOME SINGLE", StringComparison.Ordinal) || n.Contains("SINGLE LANGUAGE", StringComparison.Ordinal))
             return "7HNRX-D7KGG-3K4RQ-4WPJ4-YTDFH";
-        if (n.Contains("HOME", StringComparison.Ordinal) && !n.Contains("PRO", StringComparison.Ordinal))
+        if (n.Contains("HOME N", StringComparison.Ordinal) || n.Contains("HOMEN", StringComparison.Ordinal))
+            return "325GQ-B4C3M-K83BW-MGXCC-J8PB4";
+        if ((n.Contains("HOME", StringComparison.Ordinal) || n.Contains("홈", StringComparison.Ordinal)) && !n.Contains("PRO", StringComparison.Ordinal) && !n.Contains("프로", StringComparison.Ordinal))
             return "TX9XD-98N7V-6WMQ6-BX7FG-H8Q99";
         if (n.Contains("PRO N", StringComparison.Ordinal) || n.Contains("PRON", StringComparison.Ordinal))
             return "2B87N-8KFHP-DKV6R-Y2CV8-8FFHB";
-        if (n.Contains("PRO", StringComparison.Ordinal))
+        if (n.Contains("PRO", StringComparison.Ordinal) || n.Contains("프로", StringComparison.Ordinal))
             return "VK7JG-NPHTM-C97JM-3MPB6-3B69T";
-        if (n.Contains("ENTERPRISE", StringComparison.Ordinal))
+        if (n.Contains("ENTERPRISE", StringComparison.Ordinal) || n.Contains("기업", StringComparison.Ordinal))
             return "XFV79-B7DJ2-R6PXH-BQCQ3-8DF43";
-        if (n.Contains("EDUCATION", StringComparison.Ordinal))
+        if (n.Contains("EDUCATION", StringComparison.Ordinal) || n.Contains("교육", StringComparison.Ordinal))
             return "YNXW8-VP64B-4MC7Y-7Y3VX-7R9W2";
 
         return null;
@@ -538,15 +542,15 @@ internal static class CustomIsoUnattend
             return "CoreSingleLanguage";
         if (n.Contains("HOME N", StringComparison.Ordinal) || n.Contains("HOMEN", StringComparison.Ordinal))
             return "CoreN";
-        if (n.Contains("HOME", StringComparison.Ordinal) && !n.Contains("PRO", StringComparison.Ordinal))
+        if ((n.Contains("HOME", StringComparison.Ordinal) || n.Contains("홈", StringComparison.Ordinal)) && !n.Contains("PRO", StringComparison.Ordinal) && !n.Contains("프로", StringComparison.Ordinal))
             return "Core";
         if (n.Contains("PRO N", StringComparison.Ordinal) || n.Contains("PRON", StringComparison.Ordinal))
             return "ProfessionalN";
-        if (n.Contains("PRO", StringComparison.Ordinal))
+        if (n.Contains("PRO", StringComparison.Ordinal) || n.Contains("프로", StringComparison.Ordinal))
             return "Professional";
-        if (n.Contains("ENTERPRISE", StringComparison.Ordinal))
+        if (n.Contains("ENTERPRISE", StringComparison.Ordinal) || n.Contains("기업", StringComparison.Ordinal))
             return "Enterprise";
-        if (n.Contains("EDUCATION", StringComparison.Ordinal))
+        if (n.Contains("EDUCATION", StringComparison.Ordinal) || n.Contains("교육", StringComparison.Ordinal))
             return "Education";
 
         return "Professional";
