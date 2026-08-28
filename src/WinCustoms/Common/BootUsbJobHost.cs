@@ -494,20 +494,20 @@ public static class BootUsbJobHost
     {
         Robocopy(extractDir, volumes.DataRoot, request, "설치 파일");
 
-        // Rufus 규격: 수동 파티션 환경에서는 USB/EFI 루트에 autounattend.xml 을 두지 않고
-        // sources\$OEM$\$$\Panther\unattend.xml 에만 배치합니다.
+        // Rufus 규격: autounattend.xml 은 install.wim 이 위치한 메인 데이터 파티션(DataRoot) 루트에만 존재해야 합니다.
+        // EFI 부팅 파티션(EfiRoot)에 autounattend.xml 이 복사되면 setup.exe 가 install.wim 이 없는 EFI 파티션에서
+        // 응답 파일을 먼저 읽어 "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업창을 강제로 유발합니다.
         if (!string.IsNullOrWhiteSpace(volumes.EfiRoot))
         {
             Progress(request, 95, "EFI 파티션에 부팅 파일 복사...");
 
-            // Autounattend.xml 을 EFI 파티션 루트에도 복사 (UEFI 부팅 시 응답 파일 즉시 인식 보장)
+            // EFI 파티션 루트 및 sources 폴더에서 autounattend.xml 잔여 파일 전면 제거
             foreach (var xmlName in new[] { "Autounattend.xml", "autounattend.xml" })
             {
-                var srcXml = Path.Combine(extractDir, xmlName);
-                if (File.Exists(srcXml))
-                {
-                    File.Copy(srcXml, Path.Combine(volumes.EfiRoot, xmlName), overwrite: true);
-                }
+                var targetEfiXml = Path.Combine(volumes.EfiRoot, xmlName);
+                var targetEfiSourcesXml = Path.Combine(volumes.EfiRoot, "sources", xmlName);
+                if (File.Exists(targetEfiXml)) try { File.Delete(targetEfiXml); } catch { /* ignore */ }
+                if (File.Exists(targetEfiSourcesXml)) try { File.Delete(targetEfiSourcesXml); } catch { /* ignore */ }
             }
 
             // UEFI: ESP 에 efi\ + boot\ + sources\boot.wim
