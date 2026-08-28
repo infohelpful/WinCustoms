@@ -530,7 +530,7 @@ public static class BootUsbJobHost
                 File.Copy(bootWim, dest, overwrite: true);
             }
 
-            foreach (var cfgFile in new[] { "pid.txt", "ei.cfg" })
+            foreach (var cfgFile in new[] { "pid.txt", "ei.cfg", "unattend.xml", "Autounattend.xml" })
             {
                 var srcCfg = Path.Combine(extractDir, "sources", cfgFile);
                 if (File.Exists(srcCfg))

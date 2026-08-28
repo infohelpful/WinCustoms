@@ -253,8 +253,10 @@ public static class CustomIsoJobHost
                 OemSetupScripts.Write(extractDir, request.AppxPackageNames, request.RegistryOperations);
             }
 
-            // boot.wim 에는 TPM/SecureBoot 우회 및 드라이버만 주입 (windowsPE 가 없는 autounattend.xml 을 boot.wim 에 넣으면 오류 발생)
-            if (request.BypassSetupRequirements || request.InjectHostDrivers)
+            var xmlPath = Path.Combine(extractDir, "Autounattend.xml");
+            var hasXml = CustomIsoUnattend.NeedsUnattend(request) && File.Exists(xmlPath);
+
+            if (request.BypassSetupRequirements || request.InjectHostDrivers || hasXml)
             {
                 ThrowIfCancelled(request);
                 Progress(request, 82, "boot.wim 처리 중...");
@@ -263,7 +265,7 @@ public static class CustomIsoJobHost
                     mountDir,
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
-                    null,
+                    hasXml ? xmlPath : null,
                     request);
             }
 
@@ -446,11 +448,14 @@ public static class CustomIsoJobHost
                     AddDriversToImage(mountDir, driversDir, request);
                 }
 
-                // Rufus: windowsPE 패스가 있는 Autounattend.xml 을 boot.wim 루트에 넣으면 Setup 이 Panther 로 복사한다.
+                // Rufus: windowsPE 패스가 있는 Autounattend.xml 을 boot.wim 루트 및 sources\unattend.xml 에 배치
                 if (!string.IsNullOrWhiteSpace(autounattendPath) && File.Exists(autounattendPath))
                 {
                     Progress(request, null, $"boot.wim[{info.Index}] Autounattend.xml 주입...");
                     File.Copy(autounattendPath, Path.Combine(mountDir, "Autounattend.xml"), overwrite: true);
+                    var mountSources = Path.Combine(mountDir, "sources");
+                    Directory.CreateDirectory(mountSources);
+                    File.Copy(autounattendPath, Path.Combine(mountSources, "unattend.xml"), overwrite: true);
                 }
 
                 RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
