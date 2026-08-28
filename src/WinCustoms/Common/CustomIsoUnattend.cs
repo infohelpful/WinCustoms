@@ -73,28 +73,35 @@ internal static class CustomIsoUnattend
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
         // sources\pid.txt 및 sources\ei.cfg 자동 생성
-        // 1. ei.cfg: 제품키 입력 화면을 100% 무조건 건너뛰도록 처리
-        // 2. pid.txt: 에디션을 선택한 경우에만 해당 에디션 키를 주입하여 에디션 선택 화면까지 건너뛰고 직행.
-        //    에디션을 선택하지 않은 경우 pid.txt를 비워두어 에디션 선택 화면이 정상 표시되도록 함.
+        // 1. 에디션을 선택한 경우:
+        //    - pid.txt 에 제품키 주입
+        //    - ei.cfg 에 [EditionID] 를 명시하여 제품키 입력창과 에디션 선택창을 모두 건너뛰고 해당 에디션으로 직행
+        // 2. 에디션을 선택하지 않은 경우:
+        //    - pid.txt 제거
+        //    - ei.cfg 에 [EditionID] 없이 채널만 두어 제품키를 묻지 않고 에디션 선택창을 정상 표시
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var productKey = ResolveGenericProductKey(editionName);
+        var editionId = ResolveEditionId(editionName);
         var sourcesDir = Path.Combine(extractDir, "sources");
         if (Directory.Exists(sourcesDir))
         {
             var pidPath = Path.Combine(sourcesDir, "pid.txt");
-            if (!string.IsNullOrEmpty(productKey))
-            {
-                var pidContent = $"[PID]\r\nValue={productKey}\r\n";
-                File.WriteAllText(pidPath, pidContent, Encoding.ASCII);
-            }
-            else if (File.Exists(pidPath))
-            {
-                try { File.Delete(pidPath); } catch { /* ignore */ }
-            }
-
             var eiPath = Path.Combine(sourcesDir, "ei.cfg");
-            var eiContent = "[Channel]\r\n_Default\r\n[VL]\r\n0\r\n";
-            File.WriteAllText(eiPath, eiContent, Encoding.ASCII);
+
+            if (!string.IsNullOrEmpty(productKey) && !string.IsNullOrEmpty(editionId))
+            {
+                File.WriteAllText(pidPath, $"[PID]\r\nValue={productKey}\r\n", Encoding.ASCII);
+                File.WriteAllText(eiPath, $"[EditionID]\r\n{editionId}\r\n[Channel]\r\n_Default\r\n[VL]\r\n0\r\n", Encoding.ASCII);
+            }
+            else
+            {
+                if (File.Exists(pidPath))
+                {
+                    try { File.Delete(pidPath); } catch { /* ignore */ }
+                }
+
+                File.WriteAllText(eiPath, "[Channel]\r\n_Default\r\n[VL]\r\n0\r\n", Encoding.ASCII);
+            }
         }
     }
 
@@ -517,5 +524,30 @@ internal static class CustomIsoUnattend
             return "YNXW8-VP64B-4MC7Y-7Y3VX-7R9W2";
 
         return null;
+    }
+
+    /// <summary>ei.cfg 용 EditionID 결정 (Professional, Core, Enterprise 등).</summary>
+    private static string? ResolveEditionId(string editionName)
+    {
+        if (string.IsNullOrWhiteSpace(editionName))
+            return null;
+
+        var n = editionName.ToUpperInvariant();
+        if (n.Contains("HOME SINGLE", StringComparison.Ordinal) || n.Contains("SINGLE LANGUAGE", StringComparison.Ordinal))
+            return "CoreSingleLanguage";
+        if (n.Contains("HOME N", StringComparison.Ordinal) || n.Contains("HOMEN", StringComparison.Ordinal))
+            return "CoreN";
+        if (n.Contains("HOME", StringComparison.Ordinal) && !n.Contains("PRO", StringComparison.Ordinal))
+            return "Core";
+        if (n.Contains("PRO N", StringComparison.Ordinal) || n.Contains("PRON", StringComparison.Ordinal))
+            return "ProfessionalN";
+        if (n.Contains("PRO", StringComparison.Ordinal))
+            return "Professional";
+        if (n.Contains("ENTERPRISE", StringComparison.Ordinal))
+            return "Enterprise";
+        if (n.Contains("EDUCATION", StringComparison.Ordinal))
+            return "Education";
+
+        return "Professional";
     }
 }
