@@ -225,10 +225,6 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""        </ProductKey>""");
         }
         sb.AppendLine("""      </UserData>""");
-        sb.AppendLine("""      <DynamicUpdate>""");
-        sb.AppendLine("""        <Enable>false</Enable>""");
-        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
-        sb.AppendLine("""      </DynamicUpdate>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine("""  </settings>""");
 
@@ -351,13 +347,13 @@ internal static class CustomIsoUnattend
 
         if (request.SkipOnlineAccount)
         {
-            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v BypassNRO /t REG_DWORD /d 1 /f");
+            cmds.Add(@"reg add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE"" /v BypassNRO /t REG_DWORD /d 1 /f");
         }
 
         if (request.SkipPrivacyExperience)
         {
-            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
-            cmds.Add("cmd.exe /c reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add(@"reg add ""HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE"" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
+            cmds.Add(@"reg add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE"" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f");
         }
 
         return cmds;
