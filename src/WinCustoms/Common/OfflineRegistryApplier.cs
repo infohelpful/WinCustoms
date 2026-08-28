@@ -25,7 +25,10 @@ public static class OfflineRegistryApplier
 
         if (!File.Exists(softPath)) throw new FileNotFoundException("SOFTWARE 하이브를 찾을 수 없습니다.", softPath);
         if (!File.Exists(sysPath)) throw new FileNotFoundException("SYSTEM 하이브를 찾을 수 없습니다.", sysPath);
-        if (!File.Exists(userPath)) throw new FileNotFoundException("Default NTUSER.DAT 를 찾을 수 없습니다.", userPath);
+
+        var requiresUser = operations.Any(o => o.Root == RegistryRoot.CurrentUser);
+        if (requiresUser && !File.Exists(userPath))
+            throw new FileNotFoundException("Default NTUSER.DAT 를 찾을 수 없습니다.", userPath);
 
         var loadedSoft = false;
         var loadedSys = false;
@@ -39,8 +42,12 @@ public static class OfflineRegistryApplier
             loadedSoft = true;
             RegLoad($"HKLM\\{SysHive}", sysPath);
             loadedSys = true;
-            RegLoad($"HKLM\\{UserHive}", userPath);
-            loadedUser = true;
+
+            if (File.Exists(userPath))
+            {
+                RegLoad($"HKLM\\{UserHive}", userPath);
+                loadedUser = true;
+            }
 
             foreach (var op in operations)
             {

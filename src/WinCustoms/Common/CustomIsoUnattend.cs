@@ -192,10 +192,12 @@ internal static class CustomIsoUnattend
         const string compAttrs =
             """processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" """;
 
+        var productKey = ResolveGenericProductKey(editionName);
+
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 자동 건너뛰기 (수동 파티션 선택 직행)
+        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 / 제품키 입력창 자동 건너뛰기 (수동 파티션 선택 직행)
         // Microsoft XSD 스키마 순서: InputLocale -> SystemLocale -> UILanguage -> UserLocale -> SetupUILanguage
         sb.AppendLine("""  <settings pass="windowsPE">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
@@ -205,11 +207,19 @@ internal static class CustomIsoUnattend
         sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
         sb.AppendLine("""      <SetupUILanguage>""");
         sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
         sb.AppendLine("""      </SetupUILanguage>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
         sb.AppendLine("""      <UserData>""");
         sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        if (!string.IsNullOrEmpty(productKey))
+        {
+            sb.AppendLine("""        <ProductKey>""");
+            sb.AppendLine($"          <Key>{productKey}</Key>");
+            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
+            sb.AppendLine("""        </ProductKey>""");
+        }
         sb.AppendLine("""      </UserData>""");
         sb.AppendLine("""      <DynamicUpdate>""");
         sb.AppendLine("""        <Enable>false</Enable>""");
@@ -280,6 +290,7 @@ internal static class CustomIsoUnattend
         // 3) UserAccounts
         if (hasAccount)
         {
+            var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
             sb.AppendLine("""      <UserAccounts>""");
             sb.AppendLine("""        <LocalAccounts>""");
@@ -287,10 +298,13 @@ internal static class CustomIsoUnattend
             sb.AppendLine($"            <Name>{accountEsc}</Name>");
             sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
             sb.AppendLine("""            <Group>Administrators</Group>""");
-            sb.AppendLine("""            <Password>""");
-            sb.AppendLine($"              <Value>{pwdEsc}</Value>");
-            sb.AppendLine("""              <PlainText>true</PlainText>""");
-            sb.AppendLine("""            </Password>""");
+            if (hasPwd)
+            {
+                sb.AppendLine("""            <Password>""");
+                sb.AppendLine($"              <Value>{pwdEsc}</Value>");
+                sb.AppendLine("""              <PlainText>true</PlainText>""");
+                sb.AppendLine("""            </Password>""");
+            }
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
             sb.AppendLine("""      </UserAccounts>""");

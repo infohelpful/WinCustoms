@@ -145,13 +145,11 @@ public static class CustomIsoJobHost
 
             var wimPath = installMedia;
             var mountIndex = request.ImageIndex;
-            var hasSpecificEdition = !string.IsNullOrWhiteSpace(request.EditionName);
-            var needsMount = hasSpecificEdition && (
-                                 request.RegistryOperations.Count > 0
-                                 || request.AppxPackageNames.Count > 0
-                                 || request.InjectHostDrivers
-                                 || request.BypassSetupRequirements
-                                 || CustomIsoUnattend.NeedsUnattend(request));
+            var needsMount = request.RegistryOperations.Count > 0
+                             || request.AppxPackageNames.Count > 0
+                             || request.InjectHostDrivers
+                             || request.BypassSetupRequirements
+                             || CustomIsoUnattend.NeedsUnattend(request);
 
             // 커스터마이즈할 때만 ESD→WIM. 순정 구울 때는 install.esd 그대로 두어 전체 에디션 유지.
             if (needsMount && installMedia.EndsWith(".esd", StringComparison.OrdinalIgnoreCase))

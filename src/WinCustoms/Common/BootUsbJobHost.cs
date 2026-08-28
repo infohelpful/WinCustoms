@@ -520,13 +520,23 @@ public static class BootUsbJobHost
             }
 
             var bootWim = Path.Combine(extractDir, "sources", "boot.wim");
+            var destDir = Path.Combine(volumes.EfiRoot, "sources");
+            Directory.CreateDirectory(destDir);
+
             if (File.Exists(bootWim))
             {
-                var destDir = Path.Combine(volumes.EfiRoot, "sources");
-                Directory.CreateDirectory(destDir);
                 var dest = Path.Combine(destDir, "boot.wim");
                 ClearReadOnly(bootWim);
                 File.Copy(bootWim, dest, overwrite: true);
+            }
+
+            foreach (var cfgFile in new[] { "pid.txt", "ei.cfg" })
+            {
+                var srcCfg = Path.Combine(extractDir, "sources", cfgFile);
+                if (File.Exists(srcCfg))
+                {
+                    File.Copy(srcCfg, Path.Combine(destDir, cfgFile), overwrite: true);
+                }
             }
 
             // bootmgfw 경로 보강
