@@ -153,6 +153,7 @@ internal static class CustomIsoUnattend
         var useAutoLogon = request.EnableAutoLogon && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var locale = ResolveLocale(extractDir, editionName);
+        var productKey = ResolveGenericProductKey(editionName);
 
         var sb = new StringBuilder(8192);
         const string compAttrs =
@@ -160,6 +161,34 @@ internal static class CustomIsoUnattend
 
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
+
+        // windowsPE — 언어·EULA(약관)·제품키·에디션 자동 통과. ImageInstall(자동 파티션)을 제외하여 순정 파티션 마법사로 직행.
+        sb.AppendLine("""  <settings pass="windowsPE">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""      </SetupUILanguage>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        sb.AppendLine("""      <UserData>""");
+        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        if (!string.IsNullOrEmpty(productKey))
+        {
+            sb.AppendLine("""        <ProductKey>""");
+            sb.AppendLine($"          <Key>{productKey}</Key>");
+            sb.AppendLine("""        </ProductKey>""");
+        }
+        sb.AppendLine("""      </UserData>""");
+        sb.AppendLine("""      <DynamicUpdate>""");
+        sb.AppendLine("""        <Enable>false</Enable>""");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
+        sb.AppendLine("""      </DynamicUpdate>""");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine("""  </settings>""");
 
         // specialize — 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
         var syncCommands = BuildSpecializeCommands(request);
