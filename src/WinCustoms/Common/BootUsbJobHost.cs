@@ -497,6 +497,9 @@ public static class BootUsbJobHost
 
         var autounattend = Path.Combine(extractDir, "autounattend.xml");
 
+        // Autounattend.xml 은 최상위 루트(DataRoot)와 $OEM$\$$\Panther 에 복사
+        // USB 루트의 autounattend.xml 은 windowsPE 가 없으면 Setup 에서 무시되거나 에러를 낼 수 있으므로
+        // Rufus 규격대로 sources\$OEM$\$$\Panther\unattend.xml 로 설치 후 자동 복사되도록 함.
         if (!string.IsNullOrWhiteSpace(volumes.EfiRoot))
         {
             Progress(request, 95, "EFI 파티션에 부팅 파일 복사...");
@@ -516,13 +519,6 @@ public static class BootUsbJobHost
                 var dest = Path.Combine(destDir, "boot.wim");
                 ClearReadOnly(bootWim);
                 File.Copy(bootWim, dest, overwrite: true);
-            }
-
-            // Rufus: PE 초기에 NTFS 를 못 읽을 때를 대비해 EFI 루트에도 autounattend
-            if (File.Exists(autounattend))
-            {
-                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "autounattend.xml"), overwrite: true);
-                File.Copy(autounattend, Path.Combine(volumes.EfiRoot, "Autounattend.xml"), overwrite: true);
             }
 
             // bootmgfw 경로 보강

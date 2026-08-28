@@ -256,11 +256,8 @@ public static class CustomIsoJobHost
                 OemSetupScripts.Write(extractDir, request.AppxPackageNames, request.RegistryOperations);
             }
 
-            var autounattendPath = CustomIsoUnattend.NeedsUnattend(request)
-                ? Path.Combine(extractDir, "autounattend.xml")
-                : null;
-
-            if (request.BypassSetupRequirements || request.InjectHostDrivers || autounattendPath is not null)
+            // boot.wim 에는 TPM/SecureBoot 우회 및 드라이버만 주입 (windowsPE 가 없는 autounattend.xml 을 boot.wim 에 넣으면 오류 발생)
+            if (request.BypassSetupRequirements || request.InjectHostDrivers)
             {
                 ThrowIfCancelled(request);
                 Progress(request, 82, "boot.wim 처리 중...");
@@ -269,7 +266,7 @@ public static class CustomIsoJobHost
                     mountDir,
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
-                    autounattendPath,
+                    null,
                     request);
             }
 

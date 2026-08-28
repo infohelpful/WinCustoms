@@ -29,6 +29,7 @@ internal static class OemSetupScripts
 
         var cmd = new StringBuilder();
         cmd.AppendLine("@echo off");
+        cmd.AppendLine("rem WinCustoms SetupComplete");
         if (hasAppx)
             cmd.AppendLine("powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0WinCustoms-RemoveApps.ps1\"");
         if (hasTweaks)
