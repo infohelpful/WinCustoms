@@ -70,20 +70,20 @@ internal static class CustomIsoUnattend
     {
         var xml = BuildXml(extractDir, request);
 
-        // 1. USB 루트 및 sources 백업 경로에 Autounattend.xml 작성 (초기 언어/EULA 자동 통과용)
+        // 마이크로소프트 표준 단일 파일: USB 루트의 Autounattend.xml 하나만 생성
+        // (sources\unattend.xml 이나 $OEM$\Panther 등 중복 복사는 Setup 응답 파일 충돌을 유발하므로 제거)
         var rootXml = Path.Combine(extractDir, "autounattend.xml");
         var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
-        var sourcesXml = Path.Combine(extractDir, "sources", "unattend.xml");
         File.WriteAllText(rootXml, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         File.WriteAllText(rootXmlUpper, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        File.WriteAllText(sourcesXml, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        // 2. sources\$OEM$\$$\Panther\unattend.xml 에도 복사 (설치 완료 후 OOBE 자동 통과용)
-        var oemPantherDir = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther");
-        Directory.CreateDirectory(oemPantherDir);
-        File.WriteAllText(Path.Combine(oemPantherDir, "unattend.xml"), xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        // sources 및 $OEM$ 내 불필요한 중복 xml 정리
+        var sourcesXml = Path.Combine(extractDir, "sources", "unattend.xml");
+        var oemPantherXml = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther", "unattend.xml");
+        if (File.Exists(sourcesXml)) try { File.Delete(sourcesXml); } catch { /* */ }
+        if (File.Exists(oemPantherXml)) try { File.Delete(oemPantherXml); } catch { /* */ }
 
-        // 3. sources\pid.txt 및 sources\ei.cfg 처리
+        // sources\pid.txt 및 sources\ei.cfg 처리
         // 에디션을 선택한 경우: pid.txt 로만 제품키를 주입 (XML 안의 ProductKey 와 이중 충돌 방지)
         // 에디션을 선택하지 않은 경우: pid.txt 삭제 및 ei.cfg 로 제품키 입력창만 건너뛰고 에디션 목록 표시
         var editionName = (request.EditionName ?? string.Empty).Trim();
