@@ -72,26 +72,28 @@ internal static class CustomIsoUnattend
         var xml = BuildXml(extractDir, request);
         File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        // sources\pid.txt 및 sources\ei.cfg 자동 생성
+        // sources\pid.txt 및 sources\ei.cfg 처리
         // 1. 에디션을 선택한 경우:
-        //    - pid.txt 에 제품키 주입
-        //    - ei.cfg 에 [EditionID] 를 명시하여 제품키 입력창과 에디션 선택창을 모두 건너뛰고 해당 에디션으로 직행
-        // 2. 에디션을 선택하지 않은 경우:
-        //    - pid.txt 제거
-        //    - ei.cfg 에 [EditionID] 없이 채널만 두어 제품키를 묻지 않고 에디션 선택창을 정상 표시
+        //    - pid.txt 에 제품키 주입하여 제품키 입력창 및 에디션 선택창을 건너뛰고 직행
+        //    - ei.cfg 는 삭제하여 충돌 방지
+        // 2. 에디션을 선택하지 않은 경우 (순정 그대로 / 설치 시 선택):
+        //    - pid.txt 삭제
+        //    - ei.cfg 에 [Channel]\r\nRetail 주입하여 제품키 입력창을 건너뛰고 에디션 선택창을 정상 표시
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var productKey = ResolveGenericProductKey(editionName);
-        var editionId = ResolveEditionId(editionName);
         var sourcesDir = Path.Combine(extractDir, "sources");
         if (Directory.Exists(sourcesDir))
         {
             var pidPath = Path.Combine(sourcesDir, "pid.txt");
             var eiPath = Path.Combine(sourcesDir, "ei.cfg");
 
-            if (!string.IsNullOrEmpty(productKey) && !string.IsNullOrEmpty(editionId))
+            if (!string.IsNullOrEmpty(productKey))
             {
                 File.WriteAllText(pidPath, $"[PID]\r\nValue={productKey}\r\n", Encoding.ASCII);
-                File.WriteAllText(eiPath, $"[EditionID]\r\n{editionId}\r\n[Channel]\r\n_Default\r\n[VL]\r\n0\r\n", Encoding.ASCII);
+                if (File.Exists(eiPath))
+                {
+                    try { File.Delete(eiPath); } catch { /* ignore */ }
+                }
             }
             else
             {
@@ -100,7 +102,7 @@ internal static class CustomIsoUnattend
                     try { File.Delete(pidPath); } catch { /* ignore */ }
                 }
 
-                File.WriteAllText(eiPath, "[Channel]\r\n_Default\r\n[VL]\r\n0\r\n", Encoding.ASCII);
+                File.WriteAllText(eiPath, "[Channel]\r\nRetail\r\n[VL]\r\n0\r\n", Encoding.ASCII);
             }
         }
     }
@@ -185,7 +187,6 @@ internal static class CustomIsoUnattend
         var useAutoLogon = request.EnableAutoLogon && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
         var locale = ResolveLocale(extractDir, editionName);
-        var productKey = ResolveGenericProductKey(editionName);
 
         var sb = new StringBuilder(8192);
         const string compAttrs =
@@ -193,35 +194,6 @@ internal static class CustomIsoUnattend
 
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
-
-        // windowsPE — 언어·EULA(약관)·제품키·에디션 자동 통과. ImageInstall(자동 파티션)을 제외하여 순정 파티션 마법사로 직행.
-        sb.AppendLine("""  <settings pass="windowsPE">""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
-        sb.AppendLine("""      <SetupUILanguage>""");
-        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine("""      </SetupUILanguage>""");
-        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
-        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
-        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
-        sb.AppendLine("""      <UserData>""");
-        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
-        if (!string.IsNullOrEmpty(productKey))
-        {
-            sb.AppendLine("""        <ProductKey>""");
-            sb.AppendLine($"          <Key>{productKey}</Key>");
-            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
-            sb.AppendLine("""        </ProductKey>""");
-        }
-        sb.AppendLine("""      </UserData>""");
-        sb.AppendLine("""      <DynamicUpdate>""");
-        sb.AppendLine("""        <Enable>false</Enable>""");
-        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
-        sb.AppendLine("""      </DynamicUpdate>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine("""  </settings>""");
 
         // specialize — 설치 중 BypassNRO / 개인정보 레지스트리를 직접 실행 (25H2 대응).
         var syncCommands = BuildSpecializeCommands(request);
