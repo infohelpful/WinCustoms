@@ -295,7 +295,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""      </OOBE>""");
         }
 
-        // 3) UserAccounts
+        // 3) UserAccounts (XSD 스키마 순서: Password -> Description -> DisplayName -> Group -> Name)
         if (hasAccount)
         {
             var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
@@ -303,9 +303,6 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""      <UserAccounts>""");
             sb.AppendLine("""        <LocalAccounts>""");
             sb.AppendLine("""          <LocalAccount wcm:action="add">""");
-            sb.AppendLine($"            <Name>{accountEsc}</Name>");
-            sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
-            sb.AppendLine("""            <Group>Administrators</Group>""");
             if (hasPwd)
             {
                 sb.AppendLine("""            <Password>""");
@@ -313,6 +310,10 @@ internal static class CustomIsoUnattend
                 sb.AppendLine("""              <PlainText>true</PlainText>""");
                 sb.AppendLine("""            </Password>""");
             }
+            sb.AppendLine($"            <Description>{accountEsc}</Description>");
+            sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
+            sb.AppendLine("""            <Group>Administrators</Group>""");
+            sb.AppendLine($"            <Name>{accountEsc}</Name>");
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
             sb.AppendLine("""      </UserAccounts>""");
