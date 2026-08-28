@@ -210,9 +210,18 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // Rufus wue.c 1:1 순수 규격:
-        // AcceptEula=true + 빈 ProductKey(<Key />) 만 사용 (Rufus는 UpgradeData 태그를 사용하지 않음)
+        // 1. windowsPE — 언어/키보드 선택창, EULA 자동 동의 및 업그레이드 팝업 강제 차단
         sb.AppendLine("""  <settings pass="windowsPE">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
+        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
+        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
+        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
+        sb.AppendLine("""      </SetupUILanguage>""");
+        sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
         sb.AppendLine("""      <UserData>""");
         sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
@@ -220,6 +229,10 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""          <Key />""");
         sb.AppendLine("""        </ProductKey>""");
         sb.AppendLine("""      </UserData>""");
+        sb.AppendLine("""      <UpgradeData>""");
+        sb.AppendLine("""        <Upgrade>false</Upgrade>""");
+        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
+        sb.AppendLine("""      </UpgradeData>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine("""  </settings>""");
 
@@ -255,39 +268,42 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
 
-        // 1) AutoLogon (XSD: OOBE 보다 앞에 위치)
+        // 1) AutoLogon (Rufus 1:1: 빈 비밀번호일 때도 UABhAHMAcwB3AG8AcgBkAA== PlainText=false 주입 필수)
         if (useAutoLogon)
         {
             var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
             sb.AppendLine("""      <AutoLogon>""");
+            sb.AppendLine("""        <Password>""");
             if (hasPwd)
             {
-                sb.AppendLine("""        <Password>""");
                 sb.AppendLine($"          <Value>{pwdEsc}</Value>");
                 sb.AppendLine("""          <PlainText>true</PlainText>""");
-                sb.AppendLine("""        </Password>""");
             }
+            else
+            {
+                sb.AppendLine("""          <Value>UABhAHMAcwB3AG8AcgBkAA==</Value>""");
+                sb.AppendLine("""          <PlainText>false</PlainText>""");
+            }
+            sb.AppendLine("""        </Password>""");
             sb.AppendLine("""        <Enabled>true</Enabled>""");
             sb.AppendLine("""        <LogonCount>1</LogonCount>""");
             sb.AppendLine($"        <Username>{accountEsc}</Username>");
             sb.AppendLine("""      </AutoLogon>""");
         }
 
-        // 2) OOBE
+        // 2) OOBE (Rufus 1:1 규격: Win11 튕김 원인인 HideLocalAccountScreen / HideOEMRegistrationScreens 제거)
         if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
         {
             sb.AppendLine("""      <OOBE>""");
             sb.AppendLine("""        <HideEULAPage>true</HideEULAPage>""");
-            sb.AppendLine("""        <HideLocalAccountScreen>true</HideLocalAccountScreen>""");
-            sb.AppendLine("""        <HideOEMRegistrationScreens>true</HideOEMRegistrationScreens>""");
             sb.AppendLine("""        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>""");
             sb.AppendLine("""        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>""");
             sb.AppendLine("""        <ProtectYourPC>3</ProtectYourPC>""");
             sb.AppendLine("""      </OOBE>""");
         }
 
-        // 3) UserAccounts (XSD 스키마 순서: Password -> Description -> DisplayName -> Group -> Name)
+        // 3) UserAccounts (Rufus 1:1 규격: Password 필수 - 빈 비밀번호일 때도 UABhAHMAcwB3AG8AcgBkAA== 주입)
         if (hasAccount)
         {
             var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
@@ -295,13 +311,18 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""      <UserAccounts>""");
             sb.AppendLine("""        <LocalAccounts>""");
             sb.AppendLine("""          <LocalAccount wcm:action="add">""");
+            sb.AppendLine("""            <Password>""");
             if (hasPwd)
             {
-                sb.AppendLine("""            <Password>""");
                 sb.AppendLine($"              <Value>{pwdEsc}</Value>");
                 sb.AppendLine("""              <PlainText>true</PlainText>""");
-                sb.AppendLine("""            </Password>""");
             }
+            else
+            {
+                sb.AppendLine("""              <Value>UABhAHMAcwB3AG8AcgBkAA==</Value>""");
+                sb.AppendLine("""              <PlainText>false</PlainText>""");
+            }
+            sb.AppendLine("""            </Password>""");
             sb.AppendLine($"            <Description>{accountEsc}</Description>");
             sb.AppendLine($"            <DisplayName>{accountEsc}</DisplayName>");
             sb.AppendLine("""            <Group>Administrators</Group>""");
