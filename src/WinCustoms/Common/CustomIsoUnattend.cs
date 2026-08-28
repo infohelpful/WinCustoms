@@ -203,15 +203,16 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
         // 1. windowsPE — 언어 선택창 / 라이선스 동의창 / 제품키 입력창 자동 건너뛰기 (수동 파티션 선택 직행)
+        // Microsoft XSD 스키마 순서: InputLocale -> SystemLocale -> UILanguage -> UserLocale -> SetupUILanguage
         sb.AppendLine("""  <settings pass="windowsPE">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
-        sb.AppendLine("""      <SetupUILanguage>""");
-        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine("""      </SetupUILanguage>""");
         sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
         sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
         sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
         sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
+        sb.AppendLine("""      <SetupUILanguage>""");
+        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
+        sb.AppendLine("""      </SetupUILanguage>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
         sb.AppendLine("""      <UserData>""");
@@ -248,6 +249,7 @@ internal static class CustomIsoUnattend
         }
 
         // 3. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
+        // Microsoft-Windows-Shell-Setup XSD 스키마 순서: AutoLogon -> OOBE -> UserAccounts -> FirstLogonCommands
         sb.AppendLine("""  <settings pass="oobeSystem">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
         sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
@@ -257,7 +259,22 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
 
-        // OOBE
+        // 1) AutoLogon (XSD: OOBE 보다 앞에 위치)
+        if (useAutoLogon)
+        {
+            var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
+            sb.AppendLine("""      <AutoLogon>""");
+            sb.AppendLine("""        <Password>""");
+            sb.AppendLine($"          <Value>{pwdEsc}</Value>");
+            sb.AppendLine("""          <PlainText>true</PlainText>""");
+            sb.AppendLine("""        </Password>""");
+            sb.AppendLine("""        <Enabled>true</Enabled>""");
+            sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
+            sb.AppendLine($"        <Username>{accountEsc}</Username>");
+            sb.AppendLine("""      </AutoLogon>""");
+        }
+
+        // 2) OOBE
         if (request.SkipPrivacyExperience || request.SkipOnlineAccount)
         {
             sb.AppendLine("""      <OOBE>""");
@@ -274,7 +291,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""      </OOBE>""");
         }
 
-        // UserAccounts & AutoLogon
+        // 3) UserAccounts
         if (hasAccount)
         {
             var pwdEsc = WebUtility.HtmlEncode(request.LocalAccountPassword ?? string.Empty);
@@ -291,22 +308,9 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""          </LocalAccount>""");
             sb.AppendLine("""        </LocalAccounts>""");
             sb.AppendLine("""      </UserAccounts>""");
-
-            if (useAutoLogon)
-            {
-                sb.AppendLine("""      <AutoLogon>""");
-                sb.AppendLine("""        <Password>""");
-                sb.AppendLine($"          <Value>{pwdEsc}</Value>");
-                sb.AppendLine("""          <PlainText>true</PlainText>""");
-                sb.AppendLine("""        </Password>""");
-                sb.AppendLine("""        <Enabled>true</Enabled>""");
-                sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
-                sb.AppendLine($"        <Username>{accountEsc}</Username>");
-                sb.AppendLine("""      </AutoLogon>""");
-            }
         }
 
-        // FirstLogonCommands
+        // 4) FirstLogonCommands
         if (request.RegistryOperations.Count > 0)
         {
             sb.AppendLine("""      <FirstLogonCommands>""");
