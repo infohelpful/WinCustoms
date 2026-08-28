@@ -72,18 +72,27 @@ internal static class CustomIsoUnattend
 
         var utf8Bom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
 
-        // 1. USB 루트 Autounattend.xml 및 autounattend.xml
+        // 1. USB/ISO 루트에만 autounattend.xml 배치 (Rufus 표준 규격)
         var rootXml = Path.Combine(extractDir, "autounattend.xml");
-        var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
         File.WriteAllText(rootXml, xml, utf8Bom);
-        File.WriteAllText(rootXmlUpper, xml, utf8Bom);
 
-        // 2. sources\unattend.xml 및 sources\Autounattend.xml (Setup 최우선 탐색 경로)
+        // 대소문자 중복 파일 정리
+        var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
+        if (File.Exists(rootXmlUpper) && !string.Equals(rootXml, rootXmlUpper, StringComparison.OrdinalIgnoreCase))
+        {
+            try { File.Delete(rootXmlUpper); } catch { /* ignore */ }
+        }
+
+        // 2. sources\unattend.xml 및 sources\Autounattend.xml 제거
+        // setup.exe가 sources\unattend.xml을 읽으면 미디어 인플레이스 업그레이드로 오인하여
+        // "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업이 강제 발생합니다.
         var sourcesDir = Path.Combine(extractDir, "sources");
         if (Directory.Exists(sourcesDir))
         {
-            File.WriteAllText(Path.Combine(sourcesDir, "unattend.xml"), xml, utf8Bom);
-            File.WriteAllText(Path.Combine(sourcesDir, "Autounattend.xml"), xml, utf8Bom);
+            var s1 = Path.Combine(sourcesDir, "unattend.xml");
+            var s2 = Path.Combine(sourcesDir, "Autounattend.xml");
+            if (File.Exists(s1)) try { File.Delete(s1); } catch { /* ignore */ }
+            if (File.Exists(s2)) try { File.Delete(s2); } catch { /* ignore */ }
         }
 
         // sources\pid.txt 및 sources\ei.cfg 처리
@@ -201,12 +210,20 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // Rufus 규격 1:1 정밀 구현:
-        // autounattend.xml 에 <settings pass="windowsPE"> (Microsoft-Windows-Setup) 를 포함하면
-        // 디스크 파티션 자동화(<DiskConfiguration>)가 없는 상태에서 WinPE setup.exe가 업그레이드 감지를 수행하여
-        // "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업이 발생합니다.
-        // Rufus처럼 windowsPE 패스를 생략하고, 에디션/키 자동화는 sources\ei.cfg 및 sources\pid.txt로만 처리하고
-        // autounattend.xml은 specialize 및 oobeSystem 설정만 담당하도록 변경합니다.
+        // Rufus wue.c 1:1 규격 구현:
+        // AcceptEula=true + 빈 ProductKey(<Key />) 조합으로 WinPE 단계의 EULA 동의창 및 제품키 입력창을 자동 패스합니다.
+        // 특정 제품키 대신 빈 <Key />를 넣어 기존 OS와의 라이선스 비교로 인한 업그레이드 팝업창 발생을 방지합니다.
+        sb.AppendLine("""  <settings pass="windowsPE">""");
+        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        sb.AppendLine("""      <UserData>""");
+        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
+        sb.AppendLine("""        <ProductKey>""");
+        sb.AppendLine("""          <Key />""");
+        sb.AppendLine("""        </ProductKey>""");
+        sb.AppendLine("""      </UserData>""");
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine("""  </settings>""");
+
 
 
         // 2. specialize — BypassNRO / 개인정보 레지스트리 실행 (Rufus wue.c 1:1 규격: Order -> Path)
