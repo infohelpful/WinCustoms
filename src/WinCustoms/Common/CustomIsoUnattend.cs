@@ -210,9 +210,8 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // Rufus wue.c 1:1 규격 구현:
-        // AcceptEula=true + 빈 ProductKey(<Key />) 조합으로 WinPE 단계의 EULA 동의창 및 제품키 입력창을 자동 패스합니다.
-        // 특정 제품키 대신 빈 <Key />를 넣어 기존 OS와의 라이선스 비교로 인한 업그레이드 팝업창 발생을 방지합니다.
+        // Rufus wue.c 1:1 순수 규격:
+        // AcceptEula=true + 빈 ProductKey(<Key />) 만 사용 (Rufus는 UpgradeData 태그를 사용하지 않음)
         sb.AppendLine("""  <settings pass="windowsPE">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
         sb.AppendLine("""      <UserData>""");
