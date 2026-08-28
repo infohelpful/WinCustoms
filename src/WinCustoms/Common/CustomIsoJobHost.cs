@@ -244,9 +244,8 @@ public static class CustomIsoJobHost
             if (CustomIsoUnattend.NeedsUnattend(request))
             {
                 ThrowIfCancelled(request);
-                Progress(request, 80, "autounattend.xml 작성...");
+                Progress(request, 80, "무인 설치 응답 파일 작성...");
                 CustomIsoUnattend.WriteAutounattendXml(extractDir, request);
-                CustomIsoUnattend.WriteOemPantherCopy(extractDir);
             }
 
             if (request.AppxPackageNames.Count > 0 || request.RegistryOperations.Count > 0)

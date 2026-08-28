@@ -68,15 +68,23 @@ internal static class CustomIsoUnattend
 
     public static void WriteAutounattendXml(string extractDir, CustomIsoJobRequest request)
     {
-        var path = Path.Combine(extractDir, "autounattend.xml");
-        var pathUpper = Path.Combine(extractDir, "Autounattend.xml");
         var xml = BuildXml(extractDir, request);
-        File.WriteAllText(path, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        File.WriteAllText(pathUpper, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        // sources\unattend.xml 백업 생성 (Windows Setup 탐색 경로 1순위)
-        var sourcesUnattend = Path.Combine(extractDir, "sources", "unattend.xml");
-        File.WriteAllText(sourcesUnattend, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        // Rufus 규격: 수동 파티션 선택 환경에서는 USB 루트에 autounattend.xml 을 두면
+        // WinPE 자동 설치 엔진과 수동 파티션 흐름이 충돌하여 "Windows 11을 설치하지 못했습니다" 오류가 발생합니다.
+        // 따라서 sources\$OEM$\$$\Panther\unattend.xml 에만 배치하여 윈도우 파일 복사 시
+        // %WINDIR%\Panther\unattend.xml 로 자동 주입되도록 합니다.
+        var oemPantherDir = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther");
+        Directory.CreateDirectory(oemPantherDir);
+        File.WriteAllText(Path.Combine(oemPantherDir, "unattend.xml"), xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        // 루트 잔여 파일 정리 (오류 방지)
+        var rootXml = Path.Combine(extractDir, "autounattend.xml");
+        var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
+        var sourcesXml = Path.Combine(extractDir, "sources", "unattend.xml");
+        if (File.Exists(rootXml)) try { File.Delete(rootXml); } catch { /* */ }
+        if (File.Exists(rootXmlUpper)) try { File.Delete(rootXmlUpper); } catch { /* */ }
+        if (File.Exists(sourcesXml)) try { File.Delete(sourcesXml); } catch { /* */ }
 
         // sources\pid.txt 및 sources\ei.cfg 처리
         // 1. 에디션을 선택한 경우:
@@ -113,18 +121,9 @@ internal static class CustomIsoUnattend
         }
     }
 
-    /// <summary>
-    /// Rufus: windowsPE 가 없을 때 $OEM$\$$\Panther\unattend.xml 백업 경로.
-    /// windowsPE 가 있어도 이중 안전을 위해 함께 쓴다.
-    /// </summary>
     public static void WriteOemPantherCopy(string extractDir)
     {
-        var src = Path.Combine(extractDir, "autounattend.xml");
-        if (!File.Exists(src)) return;
-
-        var dest = Path.Combine(extractDir, "sources", "$OEM$", "$$", "Panther", "unattend.xml");
-        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-        File.Copy(src, dest, overwrite: true);
+        // WriteAutounattendXml 에서 통합 처리
     }
 
     public static List<RegistryOperation> BuildOfflineRegistryOps(CustomIsoJobRequest request)
@@ -192,7 +191,6 @@ internal static class CustomIsoUnattend
         var accountEsc = WebUtility.HtmlEncode(account);
         var useAutoLogon = request.EnableAutoLogon && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
-        var productKey = ResolveGenericProductKey(editionName);
         var locale = ResolveLocale(extractDir, editionName);
 
         var sb = new StringBuilder(8192);
@@ -202,33 +200,7 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 / 제품키 입력창 자동 건너뛰기 (수동 파티션 선택 직행)
-        // Microsoft XSD 스키마 순서: InputLocale -> SystemLocale -> UILanguage -> UserLocale -> SetupUILanguage
-        sb.AppendLine("""  <settings pass="windowsPE">""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
-        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
-        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
-        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
-        sb.AppendLine("""      <SetupUILanguage>""");
-        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine("""      </SetupUILanguage>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
-        sb.AppendLine("""      <UserData>""");
-        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
-        if (!string.IsNullOrEmpty(productKey))
-        {
-            sb.AppendLine("""        <ProductKey>""");
-            sb.AppendLine($"          <Key>{productKey}</Key>");
-            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
-            sb.AppendLine("""        </ProductKey>""");
-        }
-        sb.AppendLine("""      </UserData>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine("""  </settings>""");
-
-        // 2. specialize — BypassNRO / 개인정보 레지스트리 실행
+        // 1. specialize — BypassNRO / 개인정보 레지스트리 실행
         var syncCommands = BuildSpecializeCommands(request);
         if (syncCommands.Count > 0)
         {
@@ -248,7 +220,7 @@ internal static class CustomIsoUnattend
             sb.AppendLine("""  </settings>""");
         }
 
-        // 3. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
+        // 2. oobeSystem — 언어 설정 + OOBE 건너뛰기 + 계정 자동 생성 및 자동 로그인
         // Microsoft-Windows-Shell-Setup XSD 스키마 순서: AutoLogon -> OOBE -> UserAccounts -> FirstLogonCommands
         sb.AppendLine("""  <settings pass="oobeSystem">""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core" {compAttrs}>""");
@@ -317,6 +289,12 @@ internal static class CustomIsoUnattend
             AppendFirstLogonTweakCommand(sb, order: 1, request);
             sb.AppendLine("""      </FirstLogonCommands>""");
         }
+
+        sb.AppendLine("""    </component>""");
+        sb.AppendLine("""  </settings>""");
+        sb.AppendLine("""</unattend>""");
+        return sb.ToString();
+    }
 
         sb.AppendLine("""    </component>""");
         sb.AppendLine("""  </settings>""");
