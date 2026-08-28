@@ -201,32 +201,13 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<unattend xmlns="urn:schemas-microsoft-com:unattend">""");
 
-        // 1. windowsPE — 언어 선택창 / 라이선스 동의창 / 제품키 입력창 자동 건너뛰기 (수동 파티션 선택 직행)
-        // Microsoft XSD 스키마 순서: InputLocale -> SystemLocale -> UILanguage -> UserLocale -> SetupUILanguage
-        sb.AppendLine("""  <settings pass="windowsPE">""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-International-Core-WinPE" {compAttrs}>""");
-        sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
-        sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
-        sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
-        sb.AppendLine("""      <SetupUILanguage>""");
-        sb.AppendLine($"        <UILanguage>{locale.UiLanguage}</UILanguage>");
-        sb.AppendLine("""        <WillShowUI>Never</WillShowUI>""");
-        sb.AppendLine("""      </SetupUILanguage>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
-        sb.AppendLine("""      <UserData>""");
-        sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
-        if (!string.IsNullOrEmpty(productKey))
-        {
-            sb.AppendLine("""        <ProductKey>""");
-            sb.AppendLine($"          <Key>{productKey}</Key>");
-            sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
-            sb.AppendLine("""        </ProductKey>""");
-        }
-        sb.AppendLine("""      </UserData>""");
-        sb.AppendLine("""    </component>""");
-        sb.AppendLine("""  </settings>""");
+        // Rufus 규격 1:1 정밀 구현:
+        // autounattend.xml 에 <settings pass="windowsPE"> (Microsoft-Windows-Setup) 를 포함하면
+        // 디스크 파티션 자동화(<DiskConfiguration>)가 없는 상태에서 WinPE setup.exe가 업그레이드 감지를 수행하여
+        // "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업이 발생합니다.
+        // Rufus처럼 windowsPE 패스를 생략하고, 에디션/키 자동화는 sources\ei.cfg 및 sources\pid.txt로만 처리하고
+        // autounattend.xml은 specialize 및 oobeSystem 설정만 담당하도록 변경합니다.
+
 
         // 2. specialize — BypassNRO / 개인정보 레지스트리 실행 (Rufus wue.c 1:1 규격: Order -> Path)
         var syncCommands = BuildSpecializeCommands(request);
