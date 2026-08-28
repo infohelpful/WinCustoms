@@ -233,11 +233,12 @@ else {
         $dirty = git -C $Root status --porcelain
 
         if ($dirty -and $Message) {
+            $dirtyList = @($dirty)
             git -C $Root add -A
             git -C $Root commit -m $Message --quiet
             if ($LASTEXITCODE -ne 0) { Fail '커밋에 실패했습니다.' }
 
-            Note "변경 사항 $($dirty.Count)건을 커밋했습니다: $Message"
+            Note "변경 사항 $($dirtyList.Count)건을 커밋했습니다: $Message"
             $dirty = $null
         }
 
