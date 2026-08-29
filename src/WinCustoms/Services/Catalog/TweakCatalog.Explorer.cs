@@ -1,4 +1,4 @@
-﻿using Microsoft.Win32;
+using Microsoft.Win32;
 using WinCustoms.Common;
 using WinCustoms.Models;
 
@@ -110,10 +110,22 @@ public sealed partial class TweakCatalog
                 RegistryPaths.ClassicContextMenuInprocKey,
                 Name: string.Empty,
                 Kind: RegistryValueKind.String,
+                AppliedValue: string.Empty),
+            new RegistryValueSpec(
+                RegistryRoot.LocalMachine,
+                RegistryPaths.ClassicContextMenuInprocKey,
+                Name: string.Empty,
+                Kind: RegistryValueKind.String,
                 AppliedValue: string.Empty)
         ],
-        createKeysOnApply: [(RegistryRoot.CurrentUser, RegistryPaths.ClassicContextMenuInprocKey)],
-        deleteKeysOnRestore: [(RegistryRoot.CurrentUser, RegistryPaths.ClassicContextMenuKey)],
+        createKeysOnApply: [
+            (RegistryRoot.CurrentUser, RegistryPaths.ClassicContextMenuInprocKey),
+            (RegistryRoot.LocalMachine, RegistryPaths.ClassicContextMenuInprocKey)
+        ],
+        deleteKeysOnRestore: [
+            (RegistryRoot.CurrentUser, RegistryPaths.ClassicContextMenuKey),
+            (RegistryRoot.LocalMachine, RegistryPaths.ClassicContextMenuKey)
+        ],
         requiresExplorerRestart: true,
         detect: () =>
             _registry.KeyExists(RegistryRoot.CurrentUser, RegistryPaths.ClassicContextMenuInprocKey)

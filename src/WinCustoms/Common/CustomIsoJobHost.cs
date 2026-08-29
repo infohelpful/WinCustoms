@@ -468,8 +468,11 @@ public static class CustomIsoJobHost
     private static void BuildIso(string oscdimg, string extractDir, string outputIso, CustomIsoJobRequest request)
     {
         var etfsboot = Path.Combine(extractDir, "boot", "etfsboot.com");
+        var efisysNoprompt = Path.Combine(extractDir, "efi", "microsoft", "boot", "efisys_noprompt.bin");
         var efisys = Path.Combine(extractDir, "efi", "microsoft", "boot", "efisys.bin");
-        if (!File.Exists(etfsboot) || !File.Exists(efisys))
+        var targetEfiBoot = File.Exists(efisysNoprompt) ? efisysNoprompt : efisys;
+
+        if (!File.Exists(etfsboot) || !File.Exists(targetEfiBoot))
             throw new FileNotFoundException("부팅 파일(boot\\etfsboot.com 또는 efi\\microsoft\\boot\\efisys.bin)이 없습니다.");
 
         // ArgumentList 가 -bootdata 안의 따옴표를 ""경로"" 로 넣어 oscdimg Error 123 을 낸다.
@@ -486,9 +489,9 @@ public static class CustomIsoJobHost
                 efiCopy = Path.Combine(staging, $"efi-{Environment.ProcessId}-{attempt}.bin");
 
                 ClearReadOnlyAttribute(etfsboot);
-                ClearReadOnlyAttribute(efisys);
+                ClearReadOnlyAttribute(targetEfiBoot);
                 CopyFileRaw(etfsboot, etfsCopy);
-                CopyFileRaw(efisys, efiCopy);
+                CopyFileRaw(targetEfiBoot, efiCopy);
 
                 if (!File.Exists(etfsCopy) || !File.Exists(efiCopy))
                     throw new IOException("부팅 파일 스테이징에 실패했습니다.");
@@ -500,9 +503,15 @@ public static class CustomIsoJobHost
                 }
 
                 var bootData = $"2#p0,e,b{etfsCopy}#pEF,e,b{efiCopy}";
+                var volumeLabel = !string.IsNullOrWhiteSpace(request.EditionName)
+                    ? "CCCOMA_X64FRE_" + request.EditionName.ToUpperInvariant().Replace(" ", "_")
+                    : "CCCOMA_X64FRE_WIN11";
+                if (volumeLabel.Length > 30) volumeLabel = volumeLabel.Substring(0, 30);
+
                 RunProcess(oscdimg,
                 [
-                    "-m", "-o", "-u2", "-udfver102",
+                    "-m", "-o", "-u2", "-udfver102", "-h",
+                    "-l" + volumeLabel,
                     "-bootdata:" + bootData,
                     extractDir,
                     outputIso

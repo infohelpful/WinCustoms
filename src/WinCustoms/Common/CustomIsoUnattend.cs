@@ -146,6 +146,24 @@ internal static class CustomIsoUnattend
                 1));
         }
 
+        if (request.EnableAutoLogon || request.SkipOnlineAccount)
+        {
+            var rawAccount = (request.LocalAccountName ?? string.Empty).Trim();
+            var account = rawAccount.Length > 0 ? rawAccount : "User";
+            ops.Add(RegistryOperation.Set(
+                RegistryRoot.LocalMachine,
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
+                "AutoAdminLogon",
+                RegistryValueKind.String,
+                "1"));
+            ops.Add(RegistryOperation.Set(
+                RegistryRoot.LocalMachine,
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
+                "DefaultUserName",
+                RegistryValueKind.String,
+                account));
+        }
+
         if (request.SkipPrivacyExperience)
         {
             ops.Add(RegistryOperation.Set(
@@ -287,7 +305,7 @@ internal static class CustomIsoUnattend
             }
             sb.AppendLine("""        </Password>""");
             sb.AppendLine("""        <Enabled>true</Enabled>""");
-            sb.AppendLine("""        <LogonCount>1</LogonCount>""");
+            sb.AppendLine("""        <LogonCount>9999999</LogonCount>""");
             sb.AppendLine($"        <Username>{accountEsc}</Username>");
             sb.AppendLine("""      </AutoLogon>""");
         }

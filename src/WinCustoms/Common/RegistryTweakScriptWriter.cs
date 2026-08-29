@@ -41,7 +41,7 @@ internal static class RegistryTweakScriptWriter
         sb.AppendLine("      'DWord' { Set-ItemProperty -LiteralPath $path -Name $Name -Type DWord -Value ([int]$Value) -Force; break }");
         sb.AppendLine("      'QWord' { Set-ItemProperty -LiteralPath $path -Name $Name -Type QWord -Value ([long]$Value) -Force; break }");
         sb.AppendLine("      'ExpandString' { Set-ItemProperty -LiteralPath $path -Name $Name -Type ExpandString -Value $Value -Force; break }");
-        sb.AppendLine("      default { Set-ItemProperty -LiteralPath $path -Name $Name -Type String -Value $Value -Force }");
+        sb.AppendLine("      default { if ($Name -eq '') { Set-ItemProperty -LiteralPath $path -Name '(default)' -Value $Value -Force } else { Set-ItemProperty -LiteralPath $path -Name $Name -Type String -Value $Value -Force } }");
         sb.AppendLine("    }");
         sb.AppendLine("    Log (\"OK \" + $Root + \"\\\" + $SubKey + \" [\" + $Name + \"]\")");
         sb.AppendLine("  } catch {");
