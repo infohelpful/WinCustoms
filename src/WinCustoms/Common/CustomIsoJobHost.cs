@@ -114,6 +114,19 @@ public static class CustomIsoJobHost
         if (!File.Exists(request.SourceIsoPath))
             throw new FileNotFoundException("순정 ISO를 찾을 수 없습니다.", request.SourceIsoPath);
 
+        // 이전 실행이 창 전환/강제종료 등으로 중간에 죽으면 install.wim/boot.wim 마운트가
+        // 해제되지 않고 남는다. 이후 실행에서 Mount-Image 가 "Access is denied" 로
+        // 실패하는 가장 흔한 원인이므로, 매 작업 시작 시 선제적으로 정리한다.
+        try
+        {
+            Progress(request, 1, "이전 작업의 마운트 잔여물 정리 중...");
+            RunDism(["/Cleanup-Mountpoints"], request, ignoreExit: true);
+        }
+        catch
+        {
+            // 정리 실패는 무시 — 본 작업에는 필수가 아니다.
+        }
+
         var work = string.IsNullOrWhiteSpace(request.WorkDirectory)
             ? CreateNoSpaceWorkDirectory()
             : request.WorkDirectory;

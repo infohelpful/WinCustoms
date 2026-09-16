@@ -67,10 +67,11 @@ public static class ElevatedJobHost
     }
 
     /// <summary>이미 관리자 권한인 프로세스에서 직접 호출할 수도 있다.</summary>
-    public static void Execute(ElevatedJob job, ElevatedJobResult result)
+    public static void Execute(ElevatedJob job, ElevatedJobResult result, CancellationToken ct = default)
     {
         foreach (var op in job.RegistryOperations)
         {
+            if (ct.IsCancellationRequested) break;
             try
             {
                 ApplyRegistryOperation(op, job.TargetUserSid);
@@ -83,9 +84,14 @@ public static class ElevatedJobHost
 
         foreach (var cmd in job.Commands)
         {
+            if (ct.IsCancellationRequested) break;
             try
             {
-                RunCommand(cmd);
+                RunCommand(cmd, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
@@ -193,7 +199,7 @@ public static class ElevatedJobHost
         _ => throw new ArgumentOutOfRangeException(nameof(root))
     };
 
-    private static void RunCommand(CommandOperation cmd)
+    private static void RunCommand(CommandOperation cmd, CancellationToken ct = default)
     {
         var psi = new ProcessStartInfo
         {
@@ -217,19 +223,21 @@ public static class ElevatedJobHost
         var stderrTask = process.StandardError.ReadToEndAsync();
 
         const int timeoutMs = 90_000;
-        if (!process.WaitForExit(timeoutMs))
+        var startedUtc = DateTime.UtcNow;
+        while (!process.WaitForExit(500))
         {
-            try
+            if (ct.IsCancellationRequested)
             {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // ignore
+                try { process.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new OperationCanceledException(ct);
             }
 
-            throw new TimeoutException(
-                $"{Path.GetFileName(cmd.FileName)} 이(가) {timeoutMs / 1000}초 안에 끝나지 않아 중단했습니다.");
+            if ((DateTime.UtcNow - startedUtc).TotalMilliseconds >= timeoutMs)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new TimeoutException(
+                    $"{Path.GetFileName(cmd.FileName)} 이(가) {timeoutMs / 1000}초 안에 끝나지 않아 중단했습니다.");
+            }
         }
 
         var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());

@@ -402,6 +402,11 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     {
         if (IsBusy) return;
 
+        // 확인 대화상자를 띄우는 동안(RunBusyAsync 가 IsBusy 를 켜기 전) 이 창을 비워 두면
+        // 그 사이 다른 명령이 끼어들어 두 번째 ContentDialog 를 띄우려다 WinUI3 예외가
+        // 날 수 있다 — 검증을 시작하는 시점부터 바로 잠근다.
+        IsBusy = true;
+
         OscdimgAvailable = _iso.FindOscdimgPath() is not null;
         if (!OscdimgAvailable)
         {
@@ -409,24 +414,28 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             await _dialog.ShowMessageAsync(
                 "커스텀 ISO",
                 "동봉된 Tools\\oscdimg\\oscdimg.exe 가 없습니다. 배포본을 다시 받아 주세요.");
+            IsBusy = false;
             return;
         }
 
         if (string.IsNullOrWhiteSpace(SourceIsoPath) || !File.Exists(SourceIsoPath))
         {
             StatusMessage = "순정 ISO를 선택하세요.";
+            IsBusy = false;
             return;
         }
 
         if (string.IsNullOrWhiteSpace(OutputIsoPath))
         {
             StatusMessage = "저장할 ISO 경로를 선택하세요.";
+            IsBusy = false;
             return;
         }
 
         if (SelectedEdition is null)
         {
             StatusMessage = "에디션(인덱스)을 선택하세요. ISO를 고른 뒤 목록이 채워집니다.";
+            IsBusy = false;
             return;
         }
 
@@ -447,6 +456,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             {
                 StatusMessage = accountError;
                 await _dialog.ShowMessageAsync("계정 이름", accountError);
+                IsBusy = false;
                 return;
             }
 
@@ -456,6 +466,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             {
                 StatusMessage = autoLogonError;
                 await _dialog.ShowMessageAsync("자동 로그인", autoLogonError);
+                IsBusy = false;
                 return;
             }
         }
@@ -494,7 +505,11 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             + "시작할까요?",
             "ISO 만들기");
 
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
 
         await RunBusyAsync(async (progress, ct) =>
         {

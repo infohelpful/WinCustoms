@@ -206,7 +206,7 @@ public sealed class AppxService(IShellService shell) : IAppxService
             return;
 
         var script = BuildOnlineRemovalScript(wanted);
-        await _shell.RunPowerShellAsync(script, ct).ConfigureAwait(false);
+        var scriptResult = await _shell.RunPowerShellAsync(script, ct).ConfigureAwait(false);
 
         // Windows 비동기 패키지 정리 대기 및 재확인 (최대 5회)
         for (var retry = 0; retry < 5; retry++)
@@ -224,8 +224,14 @@ public sealed class AppxService(IShellService shell) : IAppxService
         if (package.IsInstalled)
         {
             var detail = package.InstalledPackageName ?? package.PackageName;
+            // 스크립트가 남긴 FAIL:/LEFT: 진단 라인을 붙여서 "왜" 남았는지 보여준다.
+            // 이전에는 이 정보를 버리고 항상 같은 안내문만 띄웠다.
+            var reason = ExtractRemovalDiagnostics(scriptResult.Combined);
+            var suffix = reason.Length > 0
+                ? " Windows 응답: " + reason
+                : " Windows 가 보호하는 구성 요소이거나 다른 이름으로 재설치되었을 수 있습니다.";
             throw new TweakOperationException(
-                $"{package.DisplayName} 제거 후에도 남아 있습니다: {detail}. Windows 가 보호하는 구성 요소이거나 다른 이름으로 재설치되었을 수 있습니다.");
+                $"{package.DisplayName} 제거 후에도 남아 있습니다: {detail}." + suffix);
         }
     }
 
@@ -320,8 +326,10 @@ public sealed class AppxService(IShellService shell) : IAppxService
                 if (subKey is null) continue;
 
                 var stateObj = subKey.GetValue("CurrentState");
-                // 112 (0x70) = Installed, 96 (0x60) = InstallPending, 128 (0x80) = Permanent
-                if (stateObj is int state && (state == 112 || state == 96 || state == 128))
+                // 112 (0x70) = Installed, 128 (0x80) = Permanent.
+                // 96 (0x60, InstallPending) 은 아직 설치가 끝나지 않은 상태라 "설치됨"으로
+                // 잡으면 재부팅 대기 중인 제거 작업을 "제거 후에도 남아 있음" 오류로 오판할 수 있다.
+                if (stateObj is int state && (state == 112 || state == 128))
                 {
                     var baseName = pkgName.Split('~')[0];
                     names.Add(baseName);
@@ -440,15 +448,23 @@ public sealed class AppxService(IShellService shell) : IAppxService
             """;
     }
 
-    private static List<string> ParseLeftovers(string stdout)
+    /// <summary>제거 스크립트의 FAIL:/LEFT: 라인만 뽑아 사용자에게 보여줄 짧은 사유로 만든다.</summary>
+    private static string ExtractRemovalDiagnostics(string stdout)
     {
-        var left = new List<string>();
+        var reasons = new List<string>();
         foreach (var line in stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (line.StartsWith("LEFT:", StringComparison.OrdinalIgnoreCase))
-                left.Add(line[(line.IndexOf(':') + 1)..]);
+            if (line.StartsWith("FAIL:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("LEFT:", StringComparison.OrdinalIgnoreCase))
+            {
+                reasons.Add(line);
+            }
         }
-        return left;
+
+        if (reasons.Count == 0) return string.Empty;
+
+        var joined = string.Join(" / ", reasons.Distinct());
+        return joined.Length > 300 ? joined[..300] + "…" : joined;
     }
 
     private static string PsQuote(string value) => "'" + value.Replace("'", "''") + "'";

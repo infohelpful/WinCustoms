@@ -522,8 +522,18 @@ public static class SystemImageJobHost
 
             using var process = Process.Start(psi)
                                 ?? throw new InvalidOperationException("bcdboot 을 시작할 수 없습니다.");
-            var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-            process.WaitForExit(60_000);
+            // ReadToEnd 를 WaitForExit 보다 먼저 동기로 호출하면 출력이 파이프 버퍼를 채우는
+            // 동안 자식이 멈춰 있을 때 여기서도 같이 멈춰 60초 타임아웃이 무의미해진다.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(60_000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* */ }
+                WriteProgress(request, null, "bcdboot 시간 초과 — 건너뜁니다. 복원 후 WinRE에서 수동으로 실행하세요.");
+                return;
+            }
+
+            var output = stdoutTask.GetAwaiter().GetResult() + stderrTask.GetAwaiter().GetResult();
 
             if (process.ExitCode != 0)
             {

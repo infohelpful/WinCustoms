@@ -252,9 +252,19 @@ public static class SystemImageAutoRestore
 
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException($"{fileName} 을(를) 시작할 수 없습니다.");
-        var stdout = ConsoleEncoding.DecodeAuto(process.StandardOutput.ReadToEnd());
-        var stderr = ConsoleEncoding.DecodeAuto(process.StandardError.ReadToEnd());
-        process.WaitForExit(300_000);
+        // ReadToEnd 를 WaitForExit 보다 먼저(동기로) 호출하면 출력이 파이프 버퍼를 채워
+        // 자식이 멈춰 있는 동안 여기서도 같이 멈춘다 — 그러면 아래 300초 타임아웃이
+        // 사실상 도달 불가능한 죽은 코드가 된다. 비동기로 먼저 읽기 시작해야 한다.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(300_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* */ }
+            throw new TimeoutException($"{fileName} 작업이 시간 초과되었습니다.");
+        }
+
+        var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());
+        var stderr = ConsoleEncoding.DecodeAuto(stderrTask.GetAwaiter().GetResult());
 
         if (!ignoreExitCode && process.ExitCode != 0)
         {

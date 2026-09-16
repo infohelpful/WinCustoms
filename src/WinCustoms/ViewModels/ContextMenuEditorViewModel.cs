@@ -205,13 +205,7 @@ public sealed partial class ContextMenuEditorViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var entries = await _contextMenu.LoadAsync(ct);
-
-            Entries.Clear();
-            foreach (var entry in entries)
-                Entries.Add(entry);
-
-            OnPropertyChanged(nameof(HasEntries));
+            await LoadCoreAsync(ct);
         }
         catch (Exception ex)
         {
@@ -221,6 +215,20 @@ public sealed partial class ContextMenuEditorViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    // AddAsync 등 이미 IsBusy=true 인 상태에서 재사용하기 위한 내부용.
+    // LoadAsync(커맨드) 를 그대로 호출하면 그 안의 finally 가 바깥쪽 IsBusy 를 먼저
+    // false 로 되돌려 버려, 아직 마무리 중인 바깥 작업 동안 재진입 가드가 뚫린다.
+    private async Task LoadCoreAsync(CancellationToken ct)
+    {
+        var entries = await _contextMenu.LoadAsync(ct);
+
+        Entries.Clear();
+        foreach (var entry in entries)
+            Entries.Add(entry);
+
+        OnPropertyChanged(nameof(HasEntries));
     }
 
     [RelayCommand]
@@ -260,7 +268,7 @@ public sealed partial class ContextMenuEditorViewModel : ObservableObject
         try
         {
             await _contextMenu.AddAsync(entry, ct);
-            await LoadAsync(ct);
+            await LoadCoreAsync(ct);
 
             NewDisplayName = string.Empty;
             NewExecutablePath = string.Empty;
@@ -283,14 +291,19 @@ public sealed partial class ContextMenuEditorViewModel : ObservableObject
     {
         if (entry is null || IsBusy) return;
 
+        IsBusy = true;
+
         var confirmed = await _dialog.ConfirmAsync(
             "우클릭 항목 삭제",
             $"'{entry.DisplayName}' 항목을 우클릭 메뉴에서 제거합니다. 프로그램 자체는 삭제되지 않습니다.",
             "삭제");
 
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
 
-        IsBusy = true;
         try
         {
             await _contextMenu.RemoveAsync(entry, CancellationToken.None);

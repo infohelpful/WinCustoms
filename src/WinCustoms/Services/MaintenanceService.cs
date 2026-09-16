@@ -170,7 +170,14 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
             ct.ThrowIfCancellationRequested();
             if (!Directory.Exists(target)) continue;
 
-            var (f, b, s) = PurgeDirectory(target, ct);
+            // %TEMP%\WinCustoms 에는 진행 중인 부팅 USB/커스텀 ISO 작업의
+            // .progress/.result/.cancel 파일이 들어 있다. 여길 지우면 작업은 백그라운드에서
+            // 계속 진행되지만 UI 쪽 진행률 파서가 오프셋을 잃어버려 화면이 멈춘 것처럼 보인다.
+            var exclude = string.Equals(target, Path.GetTempPath(), StringComparison.OrdinalIgnoreCase)
+                ? WinCustomsWorkCleanup.TempRoot
+                : null;
+
+            var (f, b, s) = PurgeDirectory(target, ct, exclude);
             files += f;
             bytes += b;
             skipped += s;
@@ -209,7 +216,7 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
         return new CleanupReport(files, bytes, skipped);
     }
 
-    private static (int Files, long Bytes, int Skipped) PurgeDirectory(string root, CancellationToken ct)
+    private static (int Files, long Bytes, int Skipped) PurgeDirectory(string root, CancellationToken ct, string? exclude = null)
     {
         var files = 0;
         var bytes = 0L;
@@ -244,6 +251,10 @@ public sealed class MaintenanceService(IRegistryService registry, IElevationServ
         foreach (var dir in Directory.EnumerateDirectories(root, "*", options))
         {
             ct.ThrowIfCancellationRequested();
+
+            if (exclude is not null && string.Equals(dir, exclude, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             try
             {
                 var (f, b, s) = PurgeDirectory(dir, ct);

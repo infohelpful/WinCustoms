@@ -288,9 +288,14 @@ public sealed partial class WingetViewModel : ObservableObject
     {
         if (IsBusy) return;
 
+        // 확인 대화상자가 떠 있는 동안 다른 명령이 끼어들어 두 번째 ContentDialog 를
+        // 띄우지 못하도록, 검증을 시작하는 시점부터 바로 잠근다.
+        IsBusy = true;
+
         if (!WingetAvailable)
         {
             StatusMessage = "winget 이 없어 설치할 수 없습니다.";
+            IsBusy = false;
             return;
         }
 
@@ -298,6 +303,7 @@ public sealed partial class WingetViewModel : ObservableObject
         if (targets.Count == 0)
         {
             StatusMessage = "설치할 프로그램을 선택하세요.";
+            IsBusy = false;
             return;
         }
 
@@ -308,9 +314,11 @@ public sealed partial class WingetViewModel : ObservableObject
             + "일부 항목은 설치 중 관리자 권한(UAC)을 요청할 수 있습니다.",
             "설치");
 
-        if (!confirmed) return;
-
-        IsBusy = true;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
         var ok = 0;
         var fail = 0;
 

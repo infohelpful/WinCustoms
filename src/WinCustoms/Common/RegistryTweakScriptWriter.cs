@@ -53,6 +53,10 @@ internal static class RegistryTweakScriptWriter
         sb.AppendLine("  $dat = Join-Path $env:SystemDrive 'Users\\Default\\NTUSER.DAT'");
         sb.AppendLine("  if (-not (Test-Path -LiteralPath $dat)) { Log 'Default NTUSER missing'; return }");
         sb.AppendLine("  & reg.exe load $hive $dat 2>>$log | Out-Null");
+        sb.AppendLine("  if ($LASTEXITCODE -ne 0) {");
+        sb.AppendLine("    Log (\"Default 하이브 로드 실패(exit=\" + $LASTEXITCODE + \") - 이 트윅은 건너뜁니다\")");
+        sb.AppendLine("    return");
+        sb.AppendLine("  }");
         sb.AppendLine("  try { & $Action $hive } finally { & reg.exe unload $hive 2>>$log | Out-Null }");
         sb.AppendLine("}");
         sb.AppendLine("Log (\"WinCustoms tweaks start (\" + $Mode + \")\")");

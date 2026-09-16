@@ -367,6 +367,14 @@ public static class SystemImageCompanionFiles
               goto :capfail
             )
 
+            rem Restore 쪽엔 백업 드라이브=대상 드라이브 방지 가드가 있는데 Capture 쪽엔
+            rem 없었다 — 백업 출력 경로를 캡처 대상(C:) 안에 잡으면 자기 자신을 캡처하게 된다.
+            if /i "!WINVOL!"=="!CAPDRIVE!" (
+              echo ERROR: Backup output is on the same drive being captured ^(!WINVOL!^).
+              echo Choose a different USB/external drive for the backup output.
+              goto :capfail
+            )
+
             set "SCRATCH=!CAPDRIVE!\WinCustoms-DismScratch"
             if not exist "!SCRATCH!" mkdir "!SCRATCH!" >nul 2>&1
 

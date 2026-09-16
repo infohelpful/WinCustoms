@@ -243,7 +243,10 @@ public sealed partial class SystemBackupViewModel : ObservableObject
         {
             if (line.Percent is int p)
             {
-                ProgressPercent = p;
+                // BootUsb/CustomIso 뷰모델과 동일하게 뒤로 가지 않게 한다 — 그러지 않으면
+                // 늦게 도착한 낮은 % 라인 때문에 진행률 표시가 잠깐 거꾸로 튄다.
+                if (p >= ProgressPercent || IsProgressIndeterminate)
+                    ProgressPercent = p;
                 IsProgressIndeterminate = false;
                 OnPropertyChanged(nameof(ProgressText));
             }

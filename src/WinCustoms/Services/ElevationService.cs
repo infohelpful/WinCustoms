@@ -48,8 +48,12 @@ public sealed class ElevationService : IElevationService
 
         if (IsElevated)
         {
+            // 앱이 requireAdministrator 로 뜨면 항상 이 분기를 탄다. Execute 는 레지스트리
+            // 연산뿐 아니라 외부 프로세스(powercfg 등)도 동기로 실행하므로, 여기서 await
+            // 없이 그대로 호출하면 호출자(대개 UI 스레드)가 완료까지 통째로 멈춘다 —
+            // 창이 "응답 없음" 상태가 되고, 그 상태에서 다시 클릭하면 Windows 가 강제 종료한다.
             var inProcess = new ElevatedJobResult();
-            ElevatedJobHost.Execute(job, inProcess);
+            await Task.Run(() => ElevatedJobHost.Execute(job, inProcess, ct), ct).ConfigureAwait(false);
             inProcess.Success = inProcess.Errors.Count == 0;
             return inProcess;
         }

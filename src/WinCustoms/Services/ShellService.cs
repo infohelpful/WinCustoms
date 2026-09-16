@@ -114,7 +114,17 @@ public sealed class ShellService : IShellService
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
 
-        await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsync 취소는 자식 프로세스를 안 죽인다 — winget/PowerShell 이 UI 와
+            // 분리된 채 계속 돌아간다. 취소되면 실제로도 중단시킨다.
+            try { process.Kill(entireProcessTree: true); } catch { /* 이미 종료됨 */ }
+            throw;
+        }
 
         var stdout = ConsoleEncoding.DecodeAuto(await stdoutTask.ConfigureAwait(false));
         var stderr = ConsoleEncoding.DecodeAuto(await stderrTask.ConfigureAwait(false));

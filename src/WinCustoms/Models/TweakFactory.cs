@@ -127,5 +127,6 @@ public sealed class TweakFactory(IRegistryService registry)
 
     private static bool IsInsideAnyKey(RegistryValueSpec spec, IReadOnlyList<(RegistryRoot Root, string SubKey)> keys)
         => keys.Any(k => k.Root == spec.Root
-                         && spec.SubKey.StartsWith(k.SubKey, StringComparison.OrdinalIgnoreCase));
+                         && (string.Equals(spec.SubKey, k.SubKey, StringComparison.OrdinalIgnoreCase)
+                             || spec.SubKey.StartsWith(k.SubKey + "\\", StringComparison.OrdinalIgnoreCase)));
 }

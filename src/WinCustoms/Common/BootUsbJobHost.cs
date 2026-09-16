@@ -254,6 +254,34 @@ public static class BootUsbJobHost
               throw "경로 없음: $root"
             }
 
+            function Invoke-DiskPart($lines) {
+              # diskpart 는 앞 공백 있으면 0x80070057 (잘못된 매개 변수) 로 실패함
+              $tmp = Join-Path $env:TEMP ('wc-dp-' + [guid]::NewGuid().ToString('N') + '.txt')
+              [IO.File]::WriteAllLines($tmp, $lines, [Text.UTF8Encoding]::new($false))
+              $log = ''
+              $code = -1
+              try {
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = "$env:SystemRoot\System32\diskpart.exe"
+                $psi.Arguments = '/s "' + $tmp + '"'
+                $psi.UseShellExecute = $false
+                $psi.RedirectStandardOutput = $true
+                $psi.RedirectStandardError = $true
+                $psi.CreateNoWindow = $true
+                $proc = [Diagnostics.Process]::Start($psi)
+                $log = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+                $proc.WaitForExit(180000) | Out-Null
+                $code = $proc.ExitCode
+              } finally {
+                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+              }
+              [PSCustomObject]@{ Code = $code; Log = $log }
+            }
+
+            function Get-DiskStyle($diskNumber) {
+              try { [string](Get-Disk -Number $diskNumber -ErrorAction Stop).PartitionStyle } catch { 'Unknown' }
+            }
+
             function Reset-DiskStyle($diskNumber, $partitionStyle) {
               # 열려 있는 볼륨/문자부터 떼야 clean 이 안 터진다
               Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue | ForEach-Object {
@@ -272,64 +300,61 @@ public static class BootUsbJobHost
               Start-Sleep -Milliseconds 400
 
               $convert = if ($partitionStyle -eq 'GPT') { 'convert gpt' } else { 'convert mbr' }
-              # diskpart 는 앞 공백 있으면 0x80070057 (잘못된 매개 변수) 로 실패함
-              $lines = @(
-                "select disk $diskNumber"
-                "online disk"
-                "attributes disk clear readonly"
-                "clean"
-                $convert
-              )
-              $tmp = Join-Path $env:TEMP ('wc-dp-' + [guid]::NewGuid().ToString('N') + '.txt')
-              [IO.File]::WriteAllLines($tmp, $lines, [Text.UTF8Encoding]::new($false))
+              $lastLog = ''
+              $lastCode = -1
+              $delays = @(0, 1500, 4000)
 
-              $log = ''
-              $code = -1
-              try {
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = "$env:SystemRoot\System32\diskpart.exe"
-                $psi.Arguments = '/s "' + $tmp + '"'
-                $psi.UseShellExecute = $false
-                $psi.RedirectStandardOutput = $true
-                $psi.RedirectStandardError = $true
-                $psi.CreateNoWindow = $true
-                $proc = [Diagnostics.Process]::Start($psi)
-                $log = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
-                $proc.WaitForExit(180000) | Out-Null
-                $code = $proc.ExitCode
-              } finally {
-                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-              }
+              # 일부 PC(오래된 USB 컨트롤러/드라이버)는 clean 과 convert 를 같은 diskpart
+              # 세션에 넣으면 VDS 통지가 늦어 두 번째 명령이 무시되고 style 이 그대로 남는다.
+              # → clean/convert 를 분리된 세션으로 실행하고, 실패 시 캐시 갱신 후 재시도한다.
+              for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                if ($attempt -gt 0) {
+                  Start-Sleep -Milliseconds $delays[$attempt]
+                  try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
+                  try { Set-Disk -Number $diskNumber -IsOffline $false -ErrorAction SilentlyContinue } catch {}
+                }
 
-              Start-Sleep -Milliseconds 800
-              $st = [string](Get-Disk -Number $diskNumber).PartitionStyle
+                $r1 = Invoke-DiskPart @(
+                  "select disk $diskNumber"
+                  "rescan"
+                  "online disk"
+                  "attributes disk clear readonly"
+                  "clean"
+                )
+                $lastLog = $r1.Log
+                $lastCode = $r1.Code
+                Start-Sleep -Milliseconds 700
+                try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
+                $st = Get-DiskStyle $diskNumber
 
-              # exit code 가 HRESULT 로 나와도 스타일만 맞으면 성공
-              if ($st -eq $partitionStyle) { return }
+                if ($st -ne 'Raw' -and $st -ne 'Unknown') {
+                  # diskpart clean 이 실제로 안 먹었으면 PowerShell 로도 시도
+                  try { Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop } catch {}
+                  Start-Sleep -Milliseconds 600
+                  $st = Get-DiskStyle $diskNumber
+                }
 
-              if ($st -eq 'Raw' -or $st -eq 'Unknown') {
-                Initialize-Disk -Number $diskNumber -PartitionStyle $partitionStyle -Confirm:$false
-                Start-Sleep -Milliseconds 500
-                $st = [string](Get-Disk -Number $diskNumber).PartitionStyle
+                if ($st -eq 'Raw' -or $st -eq 'Unknown') {
+                  $r2 = Invoke-DiskPart @("select disk $diskNumber", $convert)
+                  $lastLog = $r2.Log
+                  $lastCode = $r2.Code
+                  Start-Sleep -Milliseconds 600
+                  $st = Get-DiskStyle $diskNumber
+
+                  if ($st -ne $partitionStyle) {
+                    try { Initialize-Disk -Number $diskNumber -PartitionStyle $partitionStyle -Confirm:$false -ErrorAction Stop } catch {}
+                    Start-Sleep -Milliseconds 500
+                    $st = Get-DiskStyle $diskNumber
+                  }
+                }
+
                 if ($st -eq $partitionStyle) { return }
               }
 
-              # PowerShell 폴백
-              try {
-                Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
-              } catch {}
-              Start-Sleep -Milliseconds 600
-              $st = [string](Get-Disk -Number $diskNumber).PartitionStyle
-              if ($st -eq 'Raw' -or $st -eq 'Unknown') {
-                Initialize-Disk -Number $diskNumber -PartitionStyle $partitionStyle -Confirm:$false
-                Start-Sleep -Milliseconds 400
-                $st = [string](Get-Disk -Number $diskNumber).PartitionStyle
-              }
-              if ($st -ne $partitionStyle) {
-                $short = ($log -replace '\s+', ' ').Trim()
-                if ($short.Length -gt 220) { $short = $short.Substring(0, 220) + '…' }
-                throw ("디스크 초기화 실패 (diskpart=$code, style=$st): " + $short)
-              }
+              $short = ($lastLog -replace '\s+', ' ').Trim()
+              if ($short.Length -gt 220) { $short = $short.Substring(0, 220) + '…' }
+              $st = Get-DiskStyle $diskNumber
+              throw ("디스크 초기화 실패 (diskpart=$lastCode, style=$st, 3회 재시도): " + $short)
             }
 
             try {

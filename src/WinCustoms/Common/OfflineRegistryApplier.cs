@@ -35,6 +35,8 @@ public static class OfflineRegistryApplier
         var loadedUser = false;
         var ok = 0;
         var fail = 0;
+        var ccsIndex = 1;
+        Exception? primary = null;
 
         try
         {
@@ -42,6 +44,7 @@ public static class OfflineRegistryApplier
             loadedSoft = true;
             RegLoad($"HKLM\\{SysHive}", sysPath);
             loadedSys = true;
+            ccsIndex = GetCurrentControlSetIndex();
 
             if (File.Exists(userPath))
             {
@@ -53,7 +56,7 @@ public static class OfflineRegistryApplier
             {
                 try
                 {
-                    ApplyOne(op);
+                    ApplyOne(op, ccsIndex);
                     ok++;
                     log?.Invoke($"REG OK {op}");
                 }
@@ -66,21 +69,57 @@ public static class OfflineRegistryApplier
 
             log?.Invoke($"REG 요약: 성공 {ok} · 실패 {fail}");
         }
+        catch (Exception ex)
+        {
+            primary = ex;
+            throw;
+        }
         finally
         {
             // GC 로 핸들을 비운 뒤 unload (Win11 에서 잠금이 남는 경우 대비)
             GC.Collect();
             GC.WaitForPendingFinalizers();
 
-            if (loadedUser) TryRegUnload($"HKLM\\{UserHive}");
-            if (loadedSys) TryRegUnload($"HKLM\\{SysHive}");
-            if (loadedSoft) TryRegUnload($"HKLM\\{SoftHive}");
+            var unloadFailures = new List<string>();
+            if (loadedUser && !TryRegUnload($"HKLM\\{UserHive}")) unloadFailures.Add(UserHive);
+            if (loadedSys && !TryRegUnload($"HKLM\\{SysHive}")) unloadFailures.Add(SysHive);
+            if (loadedSoft && !TryRegUnload($"HKLM\\{SoftHive}")) unloadFailures.Add(SoftHive);
+
+            if (unloadFailures.Count > 0)
+            {
+                log?.Invoke("REG 하이브 언로드 실패: " + string.Join(", ", unloadFailures));
+
+                // 언로드가 안 된 채로 DISM 언마운트를 시도하면 "Access is denied" 로만 보여서
+                // 진짜 원인(하이브 잠금)을 알 수 없다. 여기서 먼저 명확하게 실패시킨다.
+                // 이미 다른 예외가 전파 중이면 그 예외를 가리지 않도록 새로 던지지 않는다.
+                if (primary is null)
+                    throw new InvalidOperationException(
+                        "레지스트리 하이브 언로드 실패 (" + string.Join(", ", unloadFailures) + "). "
+                        + "이미지가 잠긴 상태로 남아 이후 DISM 언마운트가 실패할 수 있습니다.");
+            }
         }
     }
 
-    private static void ApplyOne(RegistryOperation op)
+    private static int GetCurrentControlSetIndex()
     {
-        if (!TryMap(op, out var hiveRoot, out var subKey))
+        try
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var select = baseKey.OpenSubKey($"{SysHive}\\Select");
+            if (select?.GetValue("Current") is int v && v > 0)
+                return v;
+        }
+        catch
+        {
+            // 못 읽으면 대부분의 이미지에서 맞는 기본값 1(ControlSet001)로 진행
+        }
+
+        return 1;
+    }
+
+    private static void ApplyOne(RegistryOperation op, int ccsIndex)
+    {
+        if (!TryMap(op, ccsIndex, out var hiveRoot, out var subKey))
             throw new InvalidOperationException($"오프라인으로 매핑할 수 없는 키: {op.Root}\\{op.SubKey}");
 
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
@@ -125,7 +164,7 @@ public static class OfflineRegistryApplier
     /// 라이브 루트/경로를 로드된 하이브 이름으로 변환한다.
     /// SOFTWARE 하이브 루트에는 'SOFTWARE\' 접두사가 없다.
     /// </summary>
-    internal static bool TryMap(RegistryOperation op, out string hiveRoot, out string subKey)
+    internal static bool TryMap(RegistryOperation op, int ccsIndex, out string hiveRoot, out string subKey)
     {
         hiveRoot = string.Empty;
         subKey = op.SubKey.TrimStart('\\');
@@ -156,11 +195,13 @@ public static class OfflineRegistryApplier
                 {
                     hiveRoot = SysHive;
                     subKey = subKey["SYSTEM\\".Length..];
-                    // 오프라인 이미지에는 CurrentControlSet 심볼릭 링크가 없을 수 있다.
+                    // 오프라인 이미지에는 CurrentControlSet 심볼릭 링크가 없다 — 실제 활성
+                    // ControlSet(Select\Current, 001 이 아닐 수 있음)으로 치환해야 한다.
+                    var ccsName = "ControlSet" + ccsIndex.ToString("D3", CultureInfo.InvariantCulture);
                     if (subKey.StartsWith("CurrentControlSet\\", StringComparison.OrdinalIgnoreCase))
-                        subKey = "ControlSet001\\" + subKey["CurrentControlSet\\".Length..];
+                        subKey = ccsName + "\\" + subKey["CurrentControlSet\\".Length..];
                     else if (subKey.Equals("CurrentControlSet", StringComparison.OrdinalIgnoreCase))
-                        subKey = "ControlSet001";
+                        subKey = ccsName;
                     return true;
                 }
 
@@ -185,16 +226,18 @@ public static class OfflineRegistryApplier
             throw new InvalidOperationException($"reg load 실패 ({keyName}): {result.Combined}");
     }
 
-    private static void TryRegUnload(string keyName)
+    private static bool TryRegUnload(string keyName)
     {
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 10; i++)
         {
             var result = RunReg(["unload", keyName]);
-            if (result.ExitCode == 0) return;
-            Thread.Sleep(400);
+            if (result.ExitCode == 0) return true;
+            Thread.Sleep(300 + i * 200);
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
+
+        return false;
     }
 
     private static (int ExitCode, string Combined) RunReg(IReadOnlyList<string> args)
@@ -212,9 +255,18 @@ public static class OfflineRegistryApplier
             psi.ArgumentList.Add(a);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("reg.exe 실행 실패");
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
-        p.WaitForExit(60_000);
+        // ReadToEnd 를 WaitForExit 보다 먼저 호출하면 안 된다 — 출력이 파이프 버퍼를 채우는
+        // 동안 자식이 멈춰 있으면 WaitForExit 타임아웃이 무의미해진다(교착 위험).
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(60_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* */ }
+            return (-1, "reg.exe 시간 초과");
+        }
+
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
         var combined = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
         return (p.ExitCode, combined.Trim());
     }

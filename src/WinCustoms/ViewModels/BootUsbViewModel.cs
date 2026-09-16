@@ -533,15 +533,22 @@ public sealed partial class BootUsbViewModel : ObservableObject
     {
         if (IsBusy) return;
 
+        // 확인 대화상자를 띄우는 동안(RunBusyAsync 가 IsBusy 를 켜기 전) 이 창을 비워 두면
+        // 그 사이 다른 명령(디스크 새로고침 오류 등)이 끼어들어 두 번째 ContentDialog 를
+        // 띄우려다 WinUI3 예외가 날 수 있다 — 검증을 시작하는 시점부터 바로 잠근다.
+        IsBusy = true;
+
         if (SelectedDisk is null)
         {
             StatusMessage = "USB/외장 장치를 선택하세요.";
+            IsBusy = false;
             return;
         }
 
         if (string.IsNullOrWhiteSpace(SourceIsoPath) || !File.Exists(SourceIsoPath))
         {
             StatusMessage = "Windows ISO를 선택하세요.";
+            IsBusy = false;
             return;
         }
 
@@ -555,6 +562,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
             if (accountError is not null)
             {
                 await _dialog.ShowMessageAsync("계정 이름", accountError);
+                IsBusy = false;
                 return;
             }
 
@@ -563,6 +571,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
             if (autoLogonError is not null)
             {
                 await _dialog.ShowMessageAsync("자동 로그인", autoLogonError);
+                IsBusy = false;
                 return;
             }
         }
@@ -604,7 +613,11 @@ public sealed partial class BootUsbViewModel : ObservableObject
             + "계속할까요?",
             "디스크 지우기 및 작성");
 
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
 
         var template = new BootUsbJobRequest
         {

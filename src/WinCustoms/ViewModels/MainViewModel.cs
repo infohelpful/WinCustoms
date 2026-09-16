@@ -74,14 +74,21 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (IsBusy) return;
 
+        // 확인 대화상자가 떠 있는 동안 다른 명령이 끼어들어 두 번째 ContentDialog 를
+        // 띄우지 못하도록, 확인을 시작하는 시점부터 바로 잠근다.
+        IsBusy = true;
+
         var confirmed = await _dialog.ConfirmAsync(
             "시스템 복원 지점 만들기",
             "현재 시스템 상태를 복원 지점으로 저장합니다. 관리자 권한 승인이 필요하며 보통 수십 초 걸립니다.",
             "만들기");
 
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
 
-        IsBusy = true;
         GlobalStatus = "복원 지점을 만드는 중...";
 
         try
@@ -113,10 +120,15 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (IsBusy) return;
 
+        // 확인 대화상자가 떠 있는 동안 다른 명령이 끼어들어 두 번째 ContentDialog 를
+        // 띄우지 못하도록, 검증을 시작하는 시점부터 바로 잠근다.
+        IsBusy = true;
+
         var applied = _catalog.All.Where(t => t.IsToggle && t.IsApplied).ToList();
         if (applied.Count == 0)
         {
             GlobalStatus = "적용된 트윅이 없습니다.";
+            IsBusy = false;
             return;
         }
 
@@ -125,9 +137,12 @@ public sealed partial class MainViewModel : ObservableObject
             $"현재 적용된 {applied.Count}개 항목을 전부 Windows 기본 상태로 복원합니다. 계속할까요?",
             "전체 복원");
 
-        if (!confirmed) return;
+        if (!confirmed)
+        {
+            IsBusy = false;
+            return;
+        }
 
-        IsBusy = true;
         try
         {
             var result = await _engine.RestoreAllAsync(applied, ct);
