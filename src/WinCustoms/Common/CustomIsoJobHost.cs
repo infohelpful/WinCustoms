@@ -266,7 +266,13 @@ public static class CustomIsoJobHost
                 OemSetupScripts.Write(extractDir, request.AppxPackageNames, request.RegistryOperations);
             }
 
-            if (request.BypassSetupRequirements || request.InjectHostDrivers)
+            // autounattend.xml 을 파티션 루트에 파일로만 두면, USB 가 이동식이 아니라
+            // 고정 디스크로 잡히는 경우(파티션 2개 이상 등) Windows Setup 의 자동탐색이
+            // 그 파티션을 아예 검사하지 않아 응답파일을 못 찾는다. Rufus(wue.c)는 이걸
+            // boot.wim 안에 직접 넣어서 피한다 — WinPE 가 boot.wim 자체에서 부팅하므로
+            // 파티션 구성과 무관하게 항상 찾는다. 같은 방식으로 여기서도 boot.wim 에 넣는다.
+            var needsUnattend = CustomIsoUnattend.NeedsUnattend(request);
+            if (request.BypassSetupRequirements || request.InjectHostDrivers || needsUnattend)
             {
                 ThrowIfCancelled(request);
                 Progress(request, 82, "boot.wim 처리 중...");
@@ -275,7 +281,7 @@ public static class CustomIsoJobHost
                     mountDir,
                     request.BypassSetupRequirements,
                     request.InjectHostDrivers ? driversDir : null,
-                    null,
+                    needsUnattend ? Path.Combine(extractDir, "autounattend.xml") : null,
                     request);
             }
 
@@ -456,6 +462,12 @@ public static class CustomIsoJobHost
                 {
                     Progress(request, null, $"boot.wim[{info.Index}] 드라이버 주입...");
                     AddDriversToImage(mountDir, driversDir, request);
+                }
+
+                if (!string.IsNullOrWhiteSpace(autounattendPath) && File.Exists(autounattendPath))
+                {
+                    Progress(request, null, $"boot.wim[{info.Index}] 응답 파일 주입...");
+                    File.Copy(autounattendPath, Path.Combine(mountDir, "Autounattend.xml"), overwrite: true);
                 }
 
                 RunDism(["/Unmount-Image", $"/MountDir:{mountDir}", "/Commit"], request);
@@ -978,10 +990,23 @@ public static class CustomIsoJobHost
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("PowerShell 실행 실패");
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(600_000))
+
+        // WaitForExit(600_000) 한 번으로 블로킹하면 그 안(예: ISO 추출 robocopy)에서는
+        // 취소 파일을 몇 분씩 못 보게 된다. 짧게 쪼개서 폴링해야 Cancel 이 즉시 먹는다.
+        var startedUtc = DateTime.UtcNow;
+        while (!p.WaitForExit(1500))
         {
-            try { p.Kill(entireProcessTree: true); } catch { /* */ }
-            throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
+            if (!string.IsNullOrWhiteSpace(request.CancelFile) && File.Exists(request.CancelFile))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new OperationCanceledException();
+            }
+
+            if ((DateTime.UtcNow - startedUtc).TotalMilliseconds >= 600_000)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new TimeoutException("PowerShell 작업이 시간 초과되었습니다.");
+            }
         }
 
         var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult());

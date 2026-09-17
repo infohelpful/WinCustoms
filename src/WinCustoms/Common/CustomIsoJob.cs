@@ -25,6 +25,11 @@ public sealed class CustomIsoJobRequest
     /// <summary>이 PC의 드라이버를 export 한 뒤 install.wim·boot.wim 에 주입.</summary>
     public bool InjectHostDrivers { get; set; }
 
+    /// <summary>Rufus "무인 설치" 방식: 응답파일에 DiskConfiguration/InstallTo 를 넣어 설치
+    /// 대상 디스크(디스크 0)를 자동으로 지우고 EFI+MSR+주 파티션을 만들게 한다. 부팅 USB
+    /// 흐름에서만 의미가 있다(가상머신용 ISO 등에는 위험할 수 있어 기본값 false).</summary>
+    public bool AutoPartitionTargetDisk { get; set; }
+
     /// <summary>OOBE에서 Microsoft 온라인 계정 화면을 건너뛰고 로컬 계정 경로를 연다(BypassNRO 등).</summary>
     public bool SkipOnlineAccount { get; set; }
 

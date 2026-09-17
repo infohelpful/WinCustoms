@@ -39,6 +39,13 @@ public sealed class BootUsbJobRequest
     public List<string> AppxPackageNames { get; set; } = [];
     public bool BypassSetupRequirements { get; set; }
     public bool InjectHostDrivers { get; set; }
+
+    /// <summary>Rufus "무인 설치"와 동일: 응답파일에 DiskConfiguration/InstallTo 를 직접 넣어
+    /// 설치 대상 디스크(디스크 0)를 자동으로 지우고 EFI+MSR+주 파티션을 만들게 한다.
+    /// Setup 화면의 "새로 만들기" 휴리스틱(시스템에 이미 있는 ESP 를 재사용하려는 동작)에
+    /// 기대지 않는다. 디스크를 확인 없이 지우므로 기본값 false, 명시적으로 켜야 한다.</summary>
+    public bool AutoPartitionTargetDisk { get; set; }
+
     public bool SkipOnlineAccount { get; set; }
     public bool SkipPrivacyExperience { get; set; }
     public string LocalAccountName { get; set; } = string.Empty;

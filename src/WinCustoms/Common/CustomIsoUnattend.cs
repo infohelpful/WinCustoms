@@ -22,7 +22,8 @@ internal static class CustomIsoUnattend
         || !string.IsNullOrWhiteSpace(request.LocalAccountName)
         || request.EnableAutoLogon
         || !string.IsNullOrWhiteSpace(request.EditionName)
-        || request.RegistryOperations.Count > 0;
+        || request.RegistryOperations.Count > 0
+        || request.AutoPartitionTargetDisk;
 
     /// <summary>Windows 로컬 계정 이름 규칙. 통과하면 null, 실패하면 한글 오류 메시지.</summary>
     public static string? ValidateAccountName(string? name)
@@ -241,6 +242,8 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""      </SetupUILanguage>""");
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Setup" {compAttrs}>""");
+        if (request.AutoPartitionTargetDisk)
+            AppendAutoPartitionDiskConfiguration(sb, request.ImageIndex <= 0 ? 1 : request.ImageIndex);
         sb.AppendLine("""      <UserData>""");
         sb.AppendLine("""        <AcceptEula>true</AcceptEula>""");
         sb.AppendLine("""        <ProductKey>""");
@@ -362,6 +365,84 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""  </settings>""");
         sb.AppendLine("""</unattend>""");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Rufus(wue.c CreateUnattendXml, UNATTEND_SILENT_INSTALL 플래그)와 동일한 구조.
+    /// Setup 화면의 "새로 만들기" 휴리스틱에 맡기지 않고, 응답파일에서 직접 디스크 0을
+    /// 지우고 EFI(260MB)+MSR(16MB)+주 파티션을 만들라고 명시한다. 부팅 USB 자체는
+    /// DiskID=1로 잡힐 걸로 보고 그 파티션2(우리 데이터 파티션) 라벨만 바꿔 시스템이
+    /// USB를 설치 대상으로 착각하지 않게 한다 — 실제로 부팅 USB가 항상 DiskID=1이 되는
+    /// 보장은 없지만, Rufus도 동일하게 가정하고 동작하며 여러 디스크가 있어 애매하면
+    /// 오히려 Setup이 대화형 파티션 화면을 그대로 띄운다(Rufus 주석 참고, 데이터 손실
+    /// 방지 목적).
+    /// </summary>
+    private static void AppendAutoPartitionDiskConfiguration(StringBuilder sb, int imageIndex)
+    {
+        sb.AppendLine("""      <DiskConfiguration>""");
+        sb.AppendLine("""        <WillShowUI>OnError</WillShowUI>""");
+        sb.AppendLine("""        <Disk wcm:action="modify">""");
+        sb.AppendLine("""          <DiskID>1</DiskID>""");
+        sb.AppendLine("""          <ModifyPartitions>""");
+        sb.AppendLine("""            <ModifyPartition wcm:action="modify">""");
+        sb.AppendLine("""              <Order>1</Order>""");
+        sb.AppendLine("""              <PartitionID>2</PartitionID>""");
+        sb.AppendLine("""              <Label>WINCUSTOMS</Label>""");
+        sb.AppendLine("""            </ModifyPartition>""");
+        sb.AppendLine("""          </ModifyPartitions>""");
+        sb.AppendLine("""        </Disk>""");
+        sb.AppendLine("""        <Disk wcm:action="add">""");
+        sb.AppendLine("""          <DiskID>0</DiskID>""");
+        sb.AppendLine("""          <WillWipeDisk>true</WillWipeDisk>""");
+        sb.AppendLine("""          <CreatePartitions>""");
+        sb.AppendLine("""            <CreatePartition wcm:action="add">""");
+        sb.AppendLine("""              <Order>1</Order>""");
+        sb.AppendLine("""              <Type>EFI</Type>""");
+        sb.AppendLine("""              <Size>260</Size>""");
+        sb.AppendLine("""            </CreatePartition>""");
+        sb.AppendLine("""            <CreatePartition wcm:action="add">""");
+        sb.AppendLine("""              <Order>2</Order>""");
+        sb.AppendLine("""              <Type>MSR</Type>""");
+        sb.AppendLine("""              <Size>16</Size>""");
+        sb.AppendLine("""            </CreatePartition>""");
+        sb.AppendLine("""            <CreatePartition wcm:action="add">""");
+        sb.AppendLine("""              <Order>3</Order>""");
+        sb.AppendLine("""              <Type>Primary</Type>""");
+        sb.AppendLine("""              <Extend>true</Extend>""");
+        sb.AppendLine("""            </CreatePartition>""");
+        sb.AppendLine("""          </CreatePartitions>""");
+        sb.AppendLine("""          <ModifyPartitions>""");
+        sb.AppendLine("""            <ModifyPartition wcm:action="add">""");
+        sb.AppendLine("""              <Order>1</Order>""");
+        sb.AppendLine("""              <PartitionID>1</PartitionID>""");
+        sb.AppendLine("""              <Label>EFI</Label>""");
+        sb.AppendLine("""              <Format>FAT32</Format>""");
+        sb.AppendLine("""            </ModifyPartition>""");
+        sb.AppendLine("""            <ModifyPartition wcm:action="add">""");
+        sb.AppendLine("""              <Order>2</Order>""");
+        sb.AppendLine("""              <PartitionID>3</PartitionID>""");
+        sb.AppendLine("""              <Label>Windows</Label>""");
+        sb.AppendLine("""              <Letter>C</Letter>""");
+        sb.AppendLine("""              <Format>NTFS</Format>""");
+        sb.AppendLine("""            </ModifyPartition>""");
+        sb.AppendLine("""          </ModifyPartitions>""");
+        sb.AppendLine("""        </Disk>""");
+        sb.AppendLine("""      </DiskConfiguration>""");
+        sb.AppendLine("""      <ImageInstall>""");
+        sb.AppendLine("""        <OSImage>""");
+        sb.AppendLine("""          <WillShowUI>OnError</WillShowUI>""");
+        sb.AppendLine("""          <InstallFrom>""");
+        sb.AppendLine("""            <MetaData wcm:action="add">""");
+        sb.AppendLine("""              <Key>/IMAGE/INDEX</Key>""");
+        sb.AppendLine($"              <Value>{imageIndex}</Value>");
+        sb.AppendLine("""            </MetaData>""");
+        sb.AppendLine("""          </InstallFrom>""");
+        sb.AppendLine("""          <InstallTo>""");
+        sb.AppendLine("""            <DiskID>0</DiskID>""");
+        sb.AppendLine("""            <PartitionID>3</PartitionID>""");
+        sb.AppendLine("""          </InstallTo>""");
+        sb.AppendLine("""        </OSImage>""");
+        sb.AppendLine("""      </ImageInstall>""");
     }
 
     private static void AppendFirstLogonTweakCommand(StringBuilder sb, int order, CustomIsoJobRequest request)

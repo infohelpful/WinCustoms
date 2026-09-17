@@ -141,6 +141,11 @@ public sealed partial class BootUsbViewModel : ObservableObject
     [ObservableProperty]
     public partial bool InjectHostDrivers { get; set; }
 
+    /// <summary>Rufus "무인 설치"와 동일: 설치 대상 컴퓨터의 디스크 0을 확인 없이 지우고
+    /// 자동으로 EFI+MSR+주 파티션을 만든다. 기본 OFF — 켜기 전에 위험성을 알린다.</summary>
+    [ObservableProperty]
+    public partial bool AutoPartitionTargetDisk { get; set; }
+
     [ObservableProperty]
     public partial bool SkipOnlineAccount { get; set; }
 
@@ -586,6 +591,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
 
         var applyBypass = optimize && BypassSetupRequirements;
         var applyDrivers = optimize && InjectHostDrivers;
+        var applyAutoPartition = optimize && AutoPartitionTargetDisk;
         var applySkipAccount = optimize && SkipOnlineAccount;
         var applySkipPrivacy = optimize && SkipPrivacyExperience;
         var applyAutoLogon = optimize && SkipOnlineAccount && EnableAutoLogon;
@@ -596,6 +602,27 @@ public sealed partial class BootUsbViewModel : ObservableObject
         // 특정 에디션을 선택한 경우에만 해당 에디션의 키를 주입해 에디션 선택창을 건너뜀.
         WindowsImageInfo? edition = SelectedEdition;
         var imageIndex = edition?.Index ?? 1;
+
+        // USB가 지금 되어 있는 방식과 사용자가 고른 방식이 다르면 미리 쉬운 말로 한 번 물어본다.
+        var currentStyle = SelectedDisk.PartitionStyle;
+        var targetStyle = SelectedPartitionSchemeOption;
+        var styleMismatch = !string.IsNullOrWhiteSpace(currentStyle)
+            && !string.Equals(currentStyle, "RAW", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(currentStyle, targetStyle, StringComparison.OrdinalIgnoreCase);
+
+        if (styleMismatch)
+        {
+            var okToFormat = await _dialog.ConfirmAsync(
+                "포맷 방식 확인",
+                $"이 USB는 지금 {currentStyle}로 되어 있어요.\n선택하신 {targetStyle}로 포맷할까요?",
+                $"{targetStyle}로 포맷");
+
+            if (!okToFormat)
+            {
+                IsBusy = false;
+                return;
+            }
+        }
 
         var confirmed = await _dialog.ConfirmAsync(
             "부팅 USB 만들기",
@@ -608,6 +635,10 @@ public sealed partial class BootUsbViewModel : ObservableObject
             + $"모드: {(optimize ? "최적화 설정 적용" : "순정 그대로")}\n"
             + $"파티션: {SelectedPartitionSchemeOption} · {TargetSystemText}\n"
             + $"파일 시스템: {SelectedFileSystemOption} · 레이블: {VolumeLabel}\n\n"
+            + (applyAutoPartition
+                ? "⚠ 무인 자동 파티션 켜짐: 이 USB로 부팅하는 컴퓨터의 디스크 0을 확인 없이\n"
+                  + "  지우고 자동으로 설치합니다. 대상 컴퓨터를 반드시 확인하세요.\n\n"
+                : string.Empty)
             + "· 잘못된 디스크를 고르면 복구하기 어렵습니다.\n"
             + "· 관리자 권한(UAC)이 필요합니다.\n\n"
             + "계속할까요?",
@@ -635,6 +666,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
             CreateExtendedLabelAndIcon = CreateExtendedLabelAndIcon,
             BypassSetupRequirements = applyBypass,
             InjectHostDrivers = applyDrivers,
+            AutoPartitionTargetDisk = applyAutoPartition,
             SkipOnlineAccount = applySkipAccount,
             SkipPrivacyExperience = applySkipPrivacy,
             LocalAccountName = effectiveLocalName,

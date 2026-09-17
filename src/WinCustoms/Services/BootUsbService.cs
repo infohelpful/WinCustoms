@@ -146,7 +146,19 @@ public sealed class BootUsbService(ICustomIsoService iso, IElevationService elev
                 process = Process.Start(psi)
                           ?? throw new InvalidOperationException("승격 프로세스를 시작하지 못했습니다.");
 
-                await process.WaitForExitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await process.WaitForExitAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // WaitForExitAsync 취소는 승격 프로세스를 안 죽인다 — cancelPath 는 아래
+                    // finally 에서 곧바로 지워지므로, 죽이지 않으면 취소 신호를 영영 못 보고
+                    // 디스크 작업이 백그라운드에서 계속 돈다. 실제로도 강제 종료한다.
+                    try { process.Kill(entireProcessTree: true); } catch { /* 이미 종료됨 */ }
+                    throw;
+                }
+
                 return await ReadResultAsync(resultPath, process.ExitCode, ct).ConfigureAwait(false);
             }
             finally

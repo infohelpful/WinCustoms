@@ -152,7 +152,7 @@ public static class BootUsbJobHost
             if ($null -eq $d) { 'MISSING' }
             elseif ($d.IsSystem -or $d.IsBoot) { 'SYSTEM' }
             else { 'OK' }
-            """, timeoutMs: 60_000);
+            """, timeoutMs: 60_000, request: request);
         if (safety.StartsWith("MISSING", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("대상 디스크를 찾을 수 없습니다.");
         if (safety.StartsWith("SYSTEM", StringComparison.OrdinalIgnoreCase))
@@ -170,6 +170,7 @@ public static class BootUsbJobHost
         AppxPackageNames = request.AppxPackageNames,
         BypassSetupRequirements = request.BypassSetupRequirements,
         InjectHostDrivers = request.InjectHostDrivers,
+        AutoPartitionTargetDisk = request.AutoPartitionTargetDisk,
         SkipOnlineAccount = request.SkipOnlineAccount,
         SkipPrivacyExperience = request.SkipPrivacyExperience,
         LocalAccountName = request.LocalAccountName ?? string.Empty,
@@ -190,7 +191,14 @@ public static class BootUsbJobHost
         var label = SanitizeLabel(request.VolumeLabel);
         var fs = request.FileSystem == BootUsbFileSystem.Ntfs ? "NTFS" : "FAT32";
         var style = request.PartitionScheme == BootUsbPartitionScheme.Gpt ? "GPT" : "MBR";
-        var dual = false;
+        // GPT+NTFS 는 EFI(FAT32 1GB)+데이터(NTFS) 2개로, 그 외는 단일 파티션으로 만든다.
+        // (참고) 이 USB 는 파티션이 2개면 Windows 가 "이동식"이 아니라 "고정 디스크"로
+        // 인식해버려서, 파티션 루트에 둔 autounattend.xml 을 Windows Setup 의 자동탐색이
+        // 못 찾는 문제가 실제로 있었다. 그 문제는 여기서가 아니라 CustomIsoJobHost.
+        // PatchBootWim 에서 autounattend.xml 을 boot.wim 안에 직접 심는 방식(Rufus wue.c
+        // 와 동일한 방식)으로 고쳤다 — WinPE 는 boot.wim 자체에서 부팅하므로 파티션이
+        // 몇 개든 항상 찾는다. docs/boot-usb-partitioning-incident.md 참고.
+        var dual = request.PartitionScheme == BootUsbPartitionScheme.Gpt && request.FileSystem == BootUsbFileSystem.Ntfs;
         var letter1 = FindFreeDriveLetter();
         var letter2 = FindFreeDriveLetter(exclude: letter1);
         var cluster = request.ClusterSizeBytes > 0 ? request.ClusterSizeBytes : 0;
@@ -282,7 +290,20 @@ public static class BootUsbJobHost
               try { [string](Get-Disk -Number $diskNumber -ErrorAction Stop).PartitionStyle } catch { 'Unknown' }
             }
 
-            function Reset-DiskStyle($diskNumber, $partitionStyle) {
+            # 고정된 시간만 기다리고 한 번 확인하는 대신, 느린 PC/USB 컨트롤러도 감당할 수 있게
+            # "원하는 상태가 될 때까지" 최대 timeoutMs 동안 반복 확인한다.
+            function Wait-DiskStyle($diskNumber, [string[]]$wantStyles, $timeoutMs) {
+              $deadline = (Get-Date).AddMilliseconds($timeoutMs)
+              $st = Get-DiskStyle $diskNumber
+              while (-not ($wantStyles -contains $st) -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 400
+                try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
+                $st = Get-DiskStyle $diskNumber
+              }
+              return $st
+            }
+
+            function Reset-DiskStyle($diskNumber, $partitionStyle, $createLines) {
               # 열려 있는 볼륨/문자부터 떼야 clean 이 안 터진다
               Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue | ForEach-Object {
                 $pn = $_.PartitionNumber
@@ -323,28 +344,38 @@ public static class BootUsbJobHost
                 )
                 $lastLog = $r1.Log
                 $lastCode = $r1.Code
-                Start-Sleep -Milliseconds 700
-                try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
-                $st = Get-DiskStyle $diskNumber
+
+                # "지우기"가 끝났다고 확정될 때까지 기다린다(고정 시간이 아니라 실제 상태 확인).
+                # 확인되는 즉시 통과하므로, 넉넉하게 잡아도 빠른 PC는 손해가 없다 — 느리고
+                # 저사양인 PC 를 위한 여유는 최대치로만 존재한다.
+                $st = Wait-DiskStyle $diskNumber @('Raw', 'Unknown') 20000
 
                 if ($st -ne 'Raw' -and $st -ne 'Unknown') {
                   # diskpart clean 이 실제로 안 먹었으면 PowerShell 로도 시도
                   try { Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop } catch {}
-                  Start-Sleep -Milliseconds 600
-                  $st = Get-DiskStyle $diskNumber
+                  $st = Wait-DiskStyle $diskNumber @('Raw', 'Unknown') 10000
                 }
 
                 if ($st -eq 'Raw' -or $st -eq 'Unknown') {
-                  $r2 = Invoke-DiskPart @("select disk $diskNumber", $convert)
+                  # convert 와 파티션 생성을 반드시 "같은" diskpart 세션에서 끊김 없이 이어서 실행한다.
+                  # convert 후 세션을 끝내고 기다리는 사이(폴링/캐시 갱신 포함)에 Windows 가 GPT 로
+                  # 바뀐 디스크를 감지하고 MSR(예약) 파티션을 자기 멋대로 먼저 만들어버린다 —
+                  # Rufus(drive.c)가 인용한 MSDN 문서에도 "GPT 로 초기화하면 MSR 파티션 도착을
+                  # 기다려야 한다"고 나온다. 그 틈을 없애려면 convert 직후 바로 create partition 을
+                  # 실행해서 우리가 원하는 파티션으로 먼저 채워야 한다.
+                  $r2 = Invoke-DiskPart (@("select disk $diskNumber", $convert) + $createLines)
                   $lastLog = $r2.Log
                   $lastCode = $r2.Code
-                  Start-Sleep -Milliseconds 600
-                  $st = Get-DiskStyle $diskNumber
+                  $st = Wait-DiskStyle $diskNumber @($partitionStyle) 10000
 
                   if ($st -ne $partitionStyle) {
                     try { Initialize-Disk -Number $diskNumber -PartitionStyle $partitionStyle -Confirm:$false -ErrorAction Stop } catch {}
-                    Start-Sleep -Milliseconds 500
-                    $st = Get-DiskStyle $diskNumber
+                    $st = Wait-DiskStyle $diskNumber @($partitionStyle) 8000
+                  }
+
+                  if ($st -eq $partitionStyle -and $r2.Code -ne 0) {
+                    $short = ($r2.Log -replace '\s+', ' ').Trim()
+                    throw ("파티션 생성 실패 (diskpart=$($r2.Code)): " + $short)
                   }
                 }
 
@@ -369,12 +400,54 @@ public static class BootUsbJobHost
                 try { Set-Disk -Number $n -IsReadOnly $false } catch {}
                 try { Set-Disk -Number $n -IsOffline $false } catch {}
 
-                Reset-DiskStyle $n $want
+                $createLines = if ($dual) {
+                  # 여기서 절대 'create partition efi' 로 만들면 안 된다 — 그럼 ESP GPT
+                  # 타입으로 마킹되는데, 실측 확인 결과 Windows Setup 이 대상 디스크에
+                  # 설치할 때 "시스템 어딘가에 이미 ESP 가 있다"고 착각해서 대상 디스크에
+                  # ESP 를 새로 안 만들고 MSR+주 파티션만 만들어버린다(우리 USB 자체의
+                  # ESP 를 재사용하려 함). Rufus(drive.c, UEFI:NTFS 파티션)도 정확히 이
+                  # 이유로 보조 부팅 파티션을 ESP 가 아니라 일반 데이터 타입으로 만든다 —
+                  # 펌웨어는 이동식 매체 부팅 시 GPT 타입을 안 따지고 FAT 파티션에서
+                  # \EFI\Boot\bootx64.efi 를 찾으므로 부팅엔 지장 없다.
+                  # docs/boot-usb-partitioning-incident.md 후속 수정 4 참고.
+                  @("create partition primary size=1024", "create partition primary")
+                } elseif ($want -eq 'GPT') {
+                  @("create partition efi")
+                } else {
+                  @("create partition primary", "active")
+                }
+
+                Reset-DiskStyle $n $want $createLines
+                Start-Sleep -Milliseconds 300
+                try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
+
+                # convert/create 를 한 세션에 합쳐도, Windows 가 GPT 로 바뀌는 순간 자체적으로
+                # MSR(예약) 파티션을 끼워넣는 걸 막지는 못했다(실측 확인됨). 그래서 막으려 하는
+                # 대신, 우리가 원하는 파티션을 만든 직후 남아있는 MSR 을 확실히 지워버린다 —
+                # 이 USB 는 어떤 경우에도 MSR 이 있을 이유가 없다(대상 디스크가 아니라 부팅 매체).
+                if ($want -eq 'GPT') {
+                  Get-Partition -DiskNumber $n -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Type -eq 'Reserved' } |
+                    ForEach-Object {
+                      try { Remove-Partition -DiskNumber $n -PartitionNumber $_.PartitionNumber -Confirm:$false -ErrorAction Stop } catch {}
+                    }
+                  Start-Sleep -Milliseconds 300
+                  try { Update-HostStorageCache -ErrorAction SilentlyContinue } catch {}
+                }
 
                 if ($dual) {
-                  $efi = New-Partition -DiskNumber $n -Size 1024MB -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
+                  # 위에서 두 파티션 다 'create partition primary' 로 만들어서 GptType 이
+                  # 둘 다 Basic Data 로 동일하다(의도적 — ESP 로 마킹하면 안 되는 이유는
+                  # 위 $createLines 주석 참고). 그래서 GptType 이 아니라 크기로 구분한다:
+                  # 부팅용 작은 파티션(1GB)과 나머지를 다 쓰는 데이터 파티션.
+                  $parts = Get-Partition -DiskNumber $n | Where-Object { $_.Type -ne 'Reserved' }
+                  $efi = $parts | Sort-Object Size | Select-Object -First 1
+                  $data = $parts | Sort-Object Size -Descending | Select-Object -First 1
+                  if ($null -eq $efi -or $null -eq $data -or $efi.PartitionNumber -eq $data.PartitionNumber) {
+                    throw '생성된 파티션을 찾을 수 없습니다(EFI/데이터).'
+                  }
+
                   Format-PartNoLetter $efi 'FAT32' 'ESP'
-                  $data = New-Partition -DiskNumber $n -UseMaximumSize
                   Format-PartNoLetter $data 'NTFS' $label
                   $eL = Assign-Letter $efi $L2
                   $dL = Assign-Letter $data $L1
@@ -388,8 +461,12 @@ public static class BootUsbJobHost
                   Write-Output ("EFI=" + $eRoot)
                 }
                 else {
-                  if ($want -eq 'MBR') { $part = New-Partition -DiskNumber $n -UseMaximumSize -IsActive }
-                  else { $part = New-Partition -DiskNumber $n -UseMaximumSize }
+                  $part = Get-Partition -DiskNumber $n |
+                    Where-Object { $_.Type -ne 'Reserved' } |
+                    Sort-Object Size -Descending |
+                    Select-Object -First 1
+                  if ($null -eq $part) { throw '생성된 파티션을 찾을 수 없습니다.' }
+
                   Format-PartNoLetter $part $fs $label
                   $dL = Assign-Letter $part $L1
                   $dRoot = $dL + ':\'
@@ -413,7 +490,7 @@ public static class BootUsbJobHost
                 ? $"디스크 {request.DiskNumber}: GPT · EFI(FAT32)+NTFS..."
                 : $"디스크 {request.DiskNumber}: {style} · {fs}...");
 
-        var output = RunPowerShellCapture(script, timeoutMs: 15 * 60 * 1000);
+        var output = RunPowerShellCapture(script, timeoutMs: 15 * 60 * 1000, request: request);
         string? data = null;
         string? efi = null;
         foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -519,9 +596,18 @@ public static class BootUsbJobHost
     {
         Robocopy(extractDir, volumes.DataRoot, request, "설치 파일");
 
-        // Rufus 규격: autounattend.xml 은 install.wim 이 위치한 메인 데이터 파티션(DataRoot) 루트에만 존재해야 합니다.
-        // EFI 부팅 파티션(EfiRoot)에 autounattend.xml 이 복사되면 setup.exe 가 install.wim 이 없는 EFI 파티션에서
-        // 응답 파일을 먼저 읽어 "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업창을 강제로 유발합니다.
+        // Rufus(wue.c)는 설치 미디어에서 autounattend.xml 을 파티션 루트가 아니라 boot.wim
+        // 안에만 넣는다("Windows To Go" 로 이미 설치된 OS 를 직접 부팅하는 경우만 예외적으로
+        // Panther 폴더에 직접 넣음 — 우리와 무관). boot.wim 주입(PatchBootWim)이 이미 이
+        // 파일을 처리했으니, 루트 사본은 파티션 루트에 남겨둘 이유가 없다. 오히려 남겨두면
+        // EFI 파티션에 잘못 복사됐을 때 setup.exe 가 install.wim 없는 파티션에서 응답 파일을
+        // 먼저 읽어 "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업창을
+        // 강제로 유발하는 예전 버그의 재발 여지를 남기므로, 데이터 파티션 루트에서도 지운다.
+        foreach (var xmlName in new[] { "autounattend.xml", "Autounattend.xml" })
+        {
+            var rootXml = Path.Combine(volumes.DataRoot, xmlName);
+            if (File.Exists(rootXml)) try { File.Delete(rootXml); } catch { /* ignore */ }
+        }
         if (!string.IsNullOrWhiteSpace(volumes.EfiRoot))
         {
             Progress(request, 95, "EFI 파티션에 부팅 파일 복사...");
@@ -738,7 +824,7 @@ public static class BootUsbJobHost
                 $"{Path.GetFileName(file)} 종료 코드 {p.ExitCode}. {(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr)}".Trim());
     }
 
-    private static string RunPowerShellCapture(string script, int timeoutMs = 600_000)
+    private static string RunPowerShellCapture(string script, int timeoutMs = 600_000, BootUsbJobRequest? request = null)
     {
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         var psi = new ProcessStartInfo
@@ -760,10 +846,23 @@ public static class BootUsbJobHost
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("PowerShell 실행 실패");
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(timeoutMs))
+
+        // 한 번에 긴 timeoutMs 로 블로킹하면 diskpart/포맷 중엔 취소 파일을 몇 분씩 못 본다.
+        // 짧게 쪼개서 폴링해야 Cancel 이 즉시 먹는다.
+        var startedUtc = DateTime.UtcNow;
+        while (!p.WaitForExit(500))
         {
-            try { p.Kill(entireProcessTree: true); } catch { /* */ }
-            throw new TimeoutException("디스크 작업이 시간 초과되었습니다.");
+            if (request is not null && !string.IsNullOrWhiteSpace(request.CancelFile) && File.Exists(request.CancelFile))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new OperationCanceledException();
+            }
+
+            if ((DateTime.UtcNow - startedUtc).TotalMilliseconds >= timeoutMs)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* */ }
+                throw new TimeoutException("디스크 작업이 시간 초과되었습니다.");
+            }
         }
 
         var stdout = ConsoleEncoding.DecodeAuto(stdoutTask.GetAwaiter().GetResult() ?? string.Empty);
