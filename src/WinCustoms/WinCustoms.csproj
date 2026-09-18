@@ -124,6 +124,11 @@
     <Content Include="Tools\oscdimg\oscdimg.exe"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- Ventoy 스타일 부팅 USB 기능용. 공식 배포 바이너리(v1.1.17) 그대로 동봉,
+         재컴파일/수정 없음 (GPLv3+, Tools\ventoy\NOTICE.md 참고). -->
+    <Content Include="Tools\ventoy\**"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--
@@ -139,6 +144,8 @@
       <_CompiledXbf Include="$(OutputPath)$(AssemblyName).pri" Condition="Exists('$(OutputPath)$(AssemblyName).pri')" />
       <_BundledOscdimg Include="$(MSBuildProjectDirectory)\Tools\oscdimg\oscdimg.exe"
                        Condition="Exists('$(MSBuildProjectDirectory)\Tools\oscdimg\oscdimg.exe')" />
+      <_BundledVentoy Include="$(MSBuildProjectDirectory)\Tools\ventoy\**"
+                      Condition="Exists('$(MSBuildProjectDirectory)\Tools\ventoy')" />
 
       <ResolvedFileToPublish Include="@(_CompiledXbf)">
         <RelativePath>%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
@@ -146,6 +153,10 @@
       </ResolvedFileToPublish>
       <ResolvedFileToPublish Include="@(_BundledOscdimg)">
         <RelativePath>Tools\oscdimg\oscdimg.exe</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="@(_BundledVentoy)">
+        <RelativePath>Tools\ventoy\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>

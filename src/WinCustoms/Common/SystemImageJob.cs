@@ -60,6 +60,8 @@ public sealed class SystemImageProgressLine
 [JsonSerializable(typeof(CustomIsoJobResult))]
 [JsonSerializable(typeof(BootUsbJobRequest))]
 [JsonSerializable(typeof(BootUsbJobResult))]
+[JsonSerializable(typeof(VentoyInstallJobRequest))]
+[JsonSerializable(typeof(VentoyInstallJobResult))]
 [JsonSerializable(typeof(List<RegistryOperation>))]
 [JsonSerializable(typeof(RegistryOperation))]
 public sealed partial class WinCustomsJsonContext : JsonSerializerContext;

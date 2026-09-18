@@ -8,10 +8,12 @@ namespace WinCustoms.Views;
 public sealed partial class BootUsbPage : Page
 {
     public BootUsbViewModel ViewModel { get; }
+    public VentoyViewModel VentoyViewModel { get; }
 
     public BootUsbPage()
     {
         ViewModel = App.GetService<BootUsbViewModel>();
+        VentoyViewModel = App.GetService<VentoyViewModel>();
         InitializeComponent();
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
     }
@@ -33,6 +35,25 @@ public sealed partial class BootUsbPage : Page
         if (sender is PasswordBox box)
             ViewModel.LocalAccountPassword = box.Password;
     }
+
+    // ToggleButton은 이미 선택된 걸 다시 누르면 기본 동작으로 체크가 풀려버린다.
+    // 탭은 "현재 뭐가 선택돼 있는지" 표시하는 용도라 항상 정확한 상태로 되돌려 준다.
+    private void OnRufusTabClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SelectRufusTab();
+        RufusTabButton.IsChecked = true;
+        VentoyTabButton.IsChecked = false;
+    }
+
+    private void OnVentoyTabClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SelectVentoyTab();
+        VentoyTabButton.IsChecked = true;
+        RufusTabButton.IsChecked = false;
+    }
+
+    private void OnGoToCustomIsoClick(object sender, RoutedEventArgs e)
+        => App.Window?.NavigateTo(ViewModels.NavigationTags.CustomIso);
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {

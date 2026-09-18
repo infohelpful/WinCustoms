@@ -13,9 +13,23 @@ public sealed partial class MainWindow : Window
 {
     public MainViewModel ViewModel { get; }
 
+    // 시스템 백업/커스텀 ISO/부팅 USB(Rufus+Ventoy)는 오래 걸리고 디스크를 직접
+    // 건드리는 작업이라, 하나라도 진행 중이면 다른 메뉴로 못 넘어가게 막는다.
+    // 이 넷은 전부 DI 싱글톤이고 MainWindow 도 앱 생명주기 내내 하나만 존재하므로
+    // 구독을 따로 해제할 필요는 없다(BootUsbPage 처럼 Page 단위로 생성/소멸되는
+    // 경우와 다름).
+    private readonly SystemBackupViewModel _systemBackupVm;
+    private readonly CustomIsoViewModel _customIsoVm;
+    private readonly BootUsbViewModel _bootUsbVm;
+    private readonly VentoyViewModel _ventoyVm;
+
     public MainWindow()
     {
         ViewModel = App.GetService<MainViewModel>();
+        _systemBackupVm = App.GetService<SystemBackupViewModel>();
+        _customIsoVm = App.GetService<CustomIsoViewModel>();
+        _bootUsbVm = App.GetService<BootUsbViewModel>();
+        _ventoyVm = App.GetService<VentoyViewModel>();
 
         InitializeComponent();
 
@@ -23,7 +37,40 @@ public sealed partial class MainWindow : Window
         ConfigureWindowIcon();
         ConfigureBackdrop();
 
+        _systemBackupVm.PropertyChanged += OnBusyRelatedViewModelPropertyChanged;
+        _customIsoVm.PropertyChanged += OnBusyRelatedViewModelPropertyChanged;
+        _bootUsbVm.PropertyChanged += OnBusyRelatedViewModelPropertyChanged;
+        _ventoyVm.PropertyChanged += OnBusyRelatedViewModelPropertyChanged;
+
         RootGrid.Loaded += OnRootLoaded;
+    }
+
+    // 작업 완료 시 IsBusy=false 로 바뀌는 지점이 서비스 계층 어딘가의 ConfigureAwait(false)
+    // 뒤라서(백그라운드 스레드 풀 스레드) 여기까지 UI 스레드가 아닌 채로 넘어올 수 있다.
+    // NavView.IsEnabled 같은 XAML 요소를 다른 스레드에서 직접 건드리면 예외 없이 바로
+    // 프로세스가 죽는다(Microsoft.UI.Windowing.dll 페일패스트, 실측 확인됨) — 반드시
+    // DispatcherQueue 를 거친다.
+    private void OnBusyRelatedViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != "IsBusy") return;
+
+        if (DispatcherQueue.HasThreadAccess)
+            UpdateNavEnabled();
+        else
+            DispatcherQueue.TryEnqueue(UpdateNavEnabled);
+    }
+
+    private void UpdateNavEnabled()
+    {
+        // NavView.IsEnabled 를 통째로 끄면 ContentFrame 도 같이 꺼진다 — ContentFrame 이
+        // NavView 의 Content 로 그 안에 들어있기 때문(MainWindow.xaml). 그러면 작업 중인
+        // 페이지 자체(스크롤, 취소 버튼, 로그)까지 다 먹통이 된다(실측 확인됨). 메뉴 항목만
+        // 하나씩 잠가야 한다.
+        var anyBusy = _systemBackupVm.IsBusy || _customIsoVm.IsBusy || _bootUsbVm.IsBusy || _ventoyVm.IsBusy;
+        foreach (var item in NavView.MenuItems.OfType<NavigationViewItem>())
+            item.IsEnabled = !anyBusy;
+        foreach (var item in NavView.FooterMenuItems.OfType<NavigationViewItem>())
+            item.IsEnabled = !anyBusy;
     }
 
     private void ConfigureTitleBar()
@@ -37,7 +84,16 @@ public sealed partial class MainWindow : Window
         UpdateCaptionButtonInset();
         AppWindow.Changed += (_, args) =>
         {
-            if (args.DidSizeChange) UpdateCaptionButtonInset();
+            // 여기서 예외가 새어나가면 네이티브 WinRT 이벤트 콜백 경계를 못 넘어가고
+            // 그대로 RaiseFailFastException 으로 프로세스가 즉사한다(실제 크래시 덤프로
+            // 확인됨: Microsoft_UI_Windowing!AppWindow::RaiseChanged ->
+            // ThrowExceptionForHR -> FailWithException, 2026-09-18). 절대 여기서
+            // 예외가 빠져나가면 안 된다.
+            try
+            {
+                if (args.DidSizeChange) UpdateCaptionButtonInset();
+            }
+            catch { /* 창 상태 전환 중 일시적으로 TitleBar 등이 비어있을 수 있다 — 무시 */ }
         };
     }
 
@@ -63,7 +119,12 @@ public sealed partial class MainWindow : Window
         var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1.0;
         if (scale <= 0) scale = 1.0;
 
-        CaptionButtonsColumn.Width = new GridLength(AppWindow.TitleBar.RightInset / scale);
+        // 창 상태가 바뀌는 도중(모니터 이동·DPI 변경 등)에는 TitleBar 가 일시적으로
+        // null 일 수 있다 — 그대로 .RightInset 에 접근하면 NullReferenceException.
+        var titleBar = AppWindow.TitleBar;
+        if (titleBar is null) return;
+
+        CaptionButtonsColumn.Width = new GridLength(titleBar.RightInset / scale);
     }
 
     /// <summary>
@@ -100,6 +161,23 @@ public sealed partial class MainWindow : Window
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is not NavigationViewItem { Tag: string tag }) return;
+
+        ViewModel.SelectedTag = tag;
+        Navigate(tag);
+    }
+
+    /// <summary>
+    /// 페이지 안의 버튼 등에서 다른 메뉴로 옮길 때 쓴다(예: 부팅 USB → 커스텀 ISO).
+    /// 왼쪽 네비게이션의 선택 표시도 같이 맞춰준다 — Frame.Navigate 만 직접 부르면
+    /// 내용은 바뀌어도 왼쪽 메뉴는 이전 항목이 선택된 채로 남는다.
+    /// </summary>
+    public void NavigateTo(string tag)
+    {
+        var item = NavView.MenuItems
+            .OfType<NavigationViewItem>()
+            .FirstOrDefault(i => (string?)i.Tag == tag);
+        if (item is not null)
+            NavView.SelectedItem = item;
 
         ViewModel.SelectedTag = tag;
         Navigate(tag);

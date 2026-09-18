@@ -29,6 +29,7 @@ public interface ICustomIsoService
         string? localAccountName,
         bool enableAutoLogon,
         string? localAccountPassword,
+        string? languageOverride,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default);
 }
@@ -186,6 +187,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
         string? localAccountName,
         bool enableAutoLogon,
         string? localAccountPassword,
+        string? languageOverride,
         IProgress<SystemImageProgressLine>? progress,
         CancellationToken ct = default)
     {
@@ -204,6 +206,7 @@ public sealed class CustomIsoService(IElevationService elevation) : ICustomIsoSe
                 OutputIsoPath = Path.GetFullPath(outputIso),
                 ImageIndex = imageIndex <= 0 ? 1 : imageIndex,
                 EditionName = (editionName ?? string.Empty).Trim(),
+                LanguageOverride = (languageOverride ?? string.Empty).Trim(),
                 WorkDirectory = work,
                 RegistryOperations = ops,
                 AppxPackageNames = appxPackageNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),

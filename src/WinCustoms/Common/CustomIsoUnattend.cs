@@ -22,6 +22,7 @@ internal static class CustomIsoUnattend
         || !string.IsNullOrWhiteSpace(request.LocalAccountName)
         || request.EnableAutoLogon
         || !string.IsNullOrWhiteSpace(request.EditionName)
+        || !string.IsNullOrWhiteSpace(request.LanguageOverride)
         || request.RegistryOperations.Count > 0
         || request.AutoPartitionTargetDisk;
 
@@ -74,26 +75,33 @@ internal static class CustomIsoUnattend
         var utf8Bom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
 
         // 1. USB/ISO 루트에만 autounattend.xml 배치 (Rufus 표준 규격)
+        // 소스 ISO가 우리가 예전에 만든 커스텀 ISO(이미 autounattend.xml이 루트에 있음)면,
+        // robocopy가 ISO(UDF/CDFS)에서 복사하면서 ReadOnly 속성까지 그대로 가져온다.
+        // 지우지 않고 바로 쓰면 UnauthorizedAccessException("Access ... is denied")이 난다.
         var rootXml = Path.Combine(extractDir, "autounattend.xml");
+        CustomIsoJobHost.ClearReadOnlyAttribute(rootXml);
         File.WriteAllText(rootXml, xml, utf8Bom);
 
         // 대소문자 중복 파일 정리
         var rootXmlUpper = Path.Combine(extractDir, "Autounattend.xml");
         if (File.Exists(rootXmlUpper) && !string.Equals(rootXml, rootXmlUpper, StringComparison.OrdinalIgnoreCase))
         {
+            CustomIsoJobHost.ClearReadOnlyAttribute(rootXmlUpper);
             try { File.Delete(rootXmlUpper); } catch { /* ignore */ }
         }
 
         // 2. sources\unattend.xml 및 sources\Autounattend.xml 제거
         // setup.exe가 sources\unattend.xml을 읽으면 미디어 인플레이스 업그레이드로 오인하여
         // "업그레이드를 시작하고 설치 미디어에서 부팅한 것 같습니다..." 팝업이 강제 발생합니다.
+        // 이것도 ReadOnly면 삭제가 조용히 실패해서(try/catch) 옛 unattend.xml이 그대로 남아
+        // 같은 팝업을 유발할 수 있으므로 삭제 전에 속성부터 지운다.
         var sourcesDir = Path.Combine(extractDir, "sources");
         if (Directory.Exists(sourcesDir))
         {
             var s1 = Path.Combine(sourcesDir, "unattend.xml");
             var s2 = Path.Combine(sourcesDir, "Autounattend.xml");
-            if (File.Exists(s1)) try { File.Delete(s1); } catch { /* ignore */ }
-            if (File.Exists(s2)) try { File.Delete(s2); } catch { /* ignore */ }
+            if (File.Exists(s1)) { CustomIsoJobHost.ClearReadOnlyAttribute(s1); try { File.Delete(s1); } catch { /* ignore */ } }
+            if (File.Exists(s2)) { CustomIsoJobHost.ClearReadOnlyAttribute(s2); try { File.Delete(s2); } catch { /* ignore */ } }
         }
 
         // sources\pid.txt 및 sources\ei.cfg 처리
@@ -107,6 +115,8 @@ internal static class CustomIsoUnattend
         {
             var pidPath = Path.Combine(sourcesDir, "pid.txt");
             var eiPath = Path.Combine(sourcesDir, "ei.cfg");
+            CustomIsoJobHost.ClearReadOnlyAttribute(pidPath);
+            CustomIsoJobHost.ClearReadOnlyAttribute(eiPath);
 
             if (!string.IsNullOrEmpty(productKey))
             {
@@ -133,9 +143,23 @@ internal static class CustomIsoUnattend
         // WriteAutounattendXml 에서 통합 처리
     }
 
-    public static List<RegistryOperation> BuildOfflineRegistryOps(CustomIsoJobRequest request)
+    public static List<RegistryOperation> BuildOfflineRegistryOps(string extractDir, CustomIsoJobRequest request)
     {
         var ops = new List<RegistryOperation>();
+
+        // Default 프로필에 선호 언어(Control Panel\International\User Profile\Languages)를
+        // 강제로 심어두면, 화면 언어 리소스는 이미 install.wim 에 있어도 Windows가 그 언어의
+        // "추가 기능"(손글씨·음성 인식·맞춤법 검사 등)이 로컬에 없다고 보고 Windows Update로
+        // 내려받으려 시도할 수 있다. 오프라인/무인 설치에서 이게 첫 로그온 직후 네트워크가
+        // 불안정하면 "업데이트 확인 중"에서 무한 대기로 이어지는 게 실측 확인됐다
+        // (2026-09-17). "복구 콘텐츠를 Windows Update에서 받지 않음" 정책으로 이 네트워크
+        // 의존성 자체를 없앤다 — 온전한 Windows Update 자체는 막지 않는다.
+        ops.Add(RegistryOperation.Set(
+            RegistryRoot.LocalMachine,
+            @"SOFTWARE\Policies\Microsoft\Windows\Servicing",
+            "RepairContentServerSource",
+            RegistryValueKind.DWord,
+            0));
 
         if (request.SkipOnlineAccount)
         {
@@ -206,6 +230,19 @@ internal static class CustomIsoUnattend
                 0));
         }
 
+        // 2026-09-18: 위 두 HKCU 값(Default 프로필 강제 주입) + FirstLogonCommands 예약
+        // 작업으로 Install-Language 재실행까지 다 해봐도 Windows 보안(SecHealthUI)이 영어로
+        // 뜨는 문제가 안 고쳐졌는데, 사용자가 "최적화 없이 Rufus로 구우면 정상적으로 한국어로
+        // 뜬다"는 걸 실측으로 확인해줬다. 즉 이건 Microsoft 쪽 미해결 버그가 아니라, 우리가
+        // "고치려고" 추가한 이 오프라인 레지스트리 주입 + FirstLogonCommands 의
+        // Install-Language 재시도(BuildLangFixTaskCommand, AutoLogon 직후·OOBE 셸 초기화와
+        // 겹치는 타이밍에 시스템 UI 언어를 다시 씀)가 오히려 그 초기화 과정과 충돌해서
+        // SecHealthUI 리소스가 영어로 굳어버리게 만든 원인이었을 가능성이 높다. Rufus는 이
+        // HKCU 강제 주입도, Install-Language 재시도도 전혀 안 하고 unattend.xml의
+        // SystemLocale/UserLocale/UILanguage/UILanguageFallback/InputLocale 만 채우는데도
+        // 정상 동작하므로, 여기서도 그 두 가지를 제거하고 Rufus와 동일하게 unattend.xml
+        // 로케일 설정에만 의존한다. 재발하면 docs/NEXT-SESSION.md 최신 기록부터 확인할 것.
+
         return ops;
     }
 
@@ -218,7 +255,7 @@ internal static class CustomIsoUnattend
         var accountEsc = WebUtility.HtmlEncode(account);
         var useAutoLogon = (request.EnableAutoLogon || request.SkipOnlineAccount) && hasAccount;
         var editionName = (request.EditionName ?? string.Empty).Trim();
-        var locale = ResolveLocale(extractDir, editionName);
+        var locale = ResolveLocale(extractDir, editionName, request.LanguageOverride);
 
         var sb = new StringBuilder(8192);
         const string compAttrs =
@@ -285,11 +322,20 @@ internal static class CustomIsoUnattend
         sb.AppendLine($"      <InputLocale>{locale.InputLocale}</InputLocale>");
         sb.AppendLine($"      <SystemLocale>{locale.SystemLocale}</SystemLocale>");
         sb.AppendLine($"      <UILanguage>{locale.UiLanguage}</UILanguage>");
+        // UILanguageFallback 이 없으면 특정 앱(Windows 보안 등)의 리소스가 완전히
+        // 스테이징 안 됐을 때 Windows 기본 폴백인 en-US 로 떨어진다(Rufus wue.c 도
+        // 이 태그를 명시적으로 채워서 이 문제를 피함). 우리가 고른 언어로 폴백시켜서
+        // 언어별 리소스가 일부 빠져 있어도 en-US 가 아니라 선택한 언어로 떨어지게 한다.
+        sb.AppendLine($"      <UILanguageFallback>{locale.UiLanguage}</UILanguageFallback>");
         sb.AppendLine($"      <UserLocale>{locale.UserLocale}</UserLocale>");
         sb.AppendLine("""    </component>""");
         sb.AppendLine($"""    <component name="Microsoft-Windows-Shell-Setup" {compAttrs}>""");
 
         // 1) AutoLogon (Rufus 1:1: 빈 비밀번호일 때도 UABhAHMAcwB3AG8AcgBkAA== PlainText=false 주입 필수)
+        // AutoLogon을 빼고 Rufus처럼 수동 로그인 1회로 시도해봤지만(2026-09-17) Windows 보안
+        // 언어 문제는 그걸로도 안 고쳐졌고, defaultuser0 잔존/설치 중 "업데이트 확인 중" 무한
+        // 대기 등 부작용만 생겨서 도로 되돌린다. Windows 보안 언어 문제는 BuildOfflineRegistryOps
+        // 의 RunOnce 기반 재시도로 별도 대응한다.
         if (useAutoLogon)
         {
             var hasPwd = !string.IsNullOrEmpty(request.LocalAccountPassword);
@@ -354,10 +400,25 @@ internal static class CustomIsoUnattend
         }
 
         // 4) FirstLogonCommands
+        // Windows 보안(SecHealthUI) 영어 표시 문제 대응으로 여기서 Install-Language 재시도
+        // 예약 작업(BuildLangFixTaskCommand)을 걸었었으나, 2026-09-18 실측으로 이 예약 작업
+        // 자체가 AutoLogon 직후 셸 초기화와 겹쳐 문제를 오히려 유발한 것으로 판명되어 제거함
+        // (BuildOfflineRegistryOps 상단 주석 참고). Rufus는 이런 후처리 없이 unattend.xml
+        // 로케일 설정만으로 정상 동작한다.
+        var firstLogonCommands = new List<string>();
         if (request.RegistryOperations.Count > 0)
+            firstLogonCommands.Add(OemSetupScripts.FirstLogonTweaksCommand);
+
+        if (firstLogonCommands.Count > 0)
         {
             sb.AppendLine("""      <FirstLogonCommands>""");
-            AppendFirstLogonTweakCommand(sb, order: 1, request);
+            for (var i = 0; i < firstLogonCommands.Count; i++)
+            {
+                sb.AppendLine("""        <SynchronousCommand wcm:action="add">""");
+                sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode(firstLogonCommands[i])}</CommandLine>");
+                sb.AppendLine($"          <Order>{i + 1}</Order>");
+                sb.AppendLine("""        </SynchronousCommand>""");
+            }
             sb.AppendLine("""      </FirstLogonCommands>""");
         }
 
@@ -445,17 +506,6 @@ internal static class CustomIsoUnattend
         sb.AppendLine("""      </ImageInstall>""");
     }
 
-    private static void AppendFirstLogonTweakCommand(StringBuilder sb, int order, CustomIsoJobRequest request)
-    {
-        if (request.RegistryOperations.Count == 0)
-            return;
-
-        sb.AppendLine("""        <SynchronousCommand wcm:action="add">""");
-        sb.AppendLine($"          <CommandLine>{WebUtility.HtmlEncode(OemSetupScripts.FirstLogonTweaksCommand)}</CommandLine>");
-        sb.AppendLine($"          <Order>{order}</Order>");
-        sb.AppendLine("""        </SynchronousCommand>""");
-    }
-
     private static List<string> BuildSpecializeCommands(CustomIsoJobRequest request)
     {
         var cmds = new List<string>();
@@ -474,15 +524,20 @@ internal static class CustomIsoUnattend
         return cmds;
     }
 
-    private sealed record LocaleSettings(
+    internal sealed record LocaleSettings(
         string UiLanguage,
         string InputLocale,
         string SystemLocale,
         string UserLocale);
 
-    private static LocaleSettings ResolveLocale(string extractDir, string editionName)
+    internal static LocaleSettings ResolveLocale(string extractDir, string editionName, string? languageOverride)
     {
-        var lang = DetectUiLanguage(extractDir) 
+        // 사용자가 언어를 명시적으로 골랐으면(설치 언어 드롭다운) 그걸 최우선으로 쓴다.
+        // 자동(기본값)일 때만 ISO 자체 언어를 감지한다.
+        if (!string.IsNullOrWhiteSpace(languageOverride))
+            return MapLocale(languageOverride.Trim());
+
+        var lang = DetectUiLanguage(extractDir)
                    ?? GuessLanguageFromEdition(editionName)
                    ?? System.Globalization.CultureInfo.CurrentUICulture.Name;
         return MapLocale(lang);

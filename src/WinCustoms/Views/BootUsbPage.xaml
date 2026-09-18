@@ -21,9 +21,21 @@
         <StackPanel Grid.Row="0" Margin="24,16,24,8" Spacing="4">
             <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="{x:Bind ViewModel.Title}" />
             <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{x:Bind ViewModel.Subtitle}" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                <ToggleButton x:Name="RufusTabButton" Content="Rufus"
+                              FontSize="16" Padding="20,10" MinWidth="140"
+                              IsChecked="{x:Bind ViewModel.IsRufusTabSelected, Mode=OneWay}"
+                              Click="OnRufusTabClick" />
+                <ToggleButton x:Name="VentoyTabButton" Content="Ventoy"
+                              FontSize="16" Padding="20,10" MinWidth="140"
+                              IsChecked="{x:Bind ViewModel.IsVentoyTabSelected, Mode=OneWay}"
+                              Click="OnVentoyTabClick" />
+            </StackPanel>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" Padding="24,0,24,16" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Row="1" Padding="24,0,24,16" VerticalScrollBarVisibility="Auto"
+                      Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsRufusTabSelected), Mode=OneWay}">
             <StackPanel Spacing="16">
 
                 <!-- 장치 -->
@@ -94,6 +106,15 @@
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"
                                    Text="순정 그대로 구울 때는 에디션을 고르지 않아도 됩니다. 「최적화 설정」을 켠 뒤에만 적용할 에디션이 필요합니다." />
+                        <ComboBox Header="설치 언어"
+                                  HorizontalAlignment="Stretch"
+                                  ItemsSource="{x:Bind ViewModel.LanguageOptions, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.SelectedLanguageOption, Mode=TwoWay}"
+                                  IsEnabled="{x:Bind views:XamlHelpers.Not(ViewModel.IsBusy), Mode=OneWay}" />
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="선택한 언어가 원본 ISO에 실제로 포함돼 있지 않으면 일부는 영어로 나올 수 있습니다(설치 중 인터넷으로 언어팩을 받는 기능은 설치가 멈추는 문제가 있어 뺐습니다)." />
                     </StackPanel>
                 </Border>
 
@@ -392,11 +413,137 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="2" Style="{StaticResource CommandBarBorderStyle}">
+        <!-- Ventoy 탭 -->
+        <ScrollViewer Grid.Row="1" Padding="24,0,24,16" VerticalScrollBarVisibility="Auto"
+                      Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsVentoyTabSelected), Mode=OneWay}">
+            <StackPanel Spacing="16">
+
+                <!-- 장치 -->
+                <Border Style="{StaticResource TweakCardStyle}" Padding="16">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="1. 장치 (USB / 외장)" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <Button Grid.Column="1" Content="새로고침"
+                                    Command="{x:Bind VentoyViewModel.RefreshDisksCommand}"
+                                    IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                        </Grid>
+                        <ComboBox Header="대상 디스크"
+                                  HorizontalAlignment="Stretch"
+                                  ItemsSource="{x:Bind VentoyViewModel.Disks, Mode=OneWay}"
+                                  SelectedItem="{x:Bind VentoyViewModel.SelectedDisk, Mode=TwoWay}"
+                                  IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="common:VentoyDiskInfo">
+                                    <TextBlock Text="{x:Bind DisplayText}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="이미 Ventoy가 설치된 USB를 고르면 기존 ISO들을 유지한 채 업데이트만 합니다. 새로 설치하면 기존 데이터가 지워집니다." />
+                    </StackPanel>
+                </Border>
+
+                <!-- 파티션 설정 -->
+                <Border Style="{StaticResource TweakCardStyle}" Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="2. 파티션 설정 (새로 설치할 때만)" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <Grid ColumnSpacing="12" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" Header="파티션 구성"
+                                      HorizontalAlignment="Stretch"
+                                      ItemsSource="{x:Bind VentoyViewModel.PartitionSchemeOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind VentoyViewModel.SelectedPartitionSchemeOption, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                            <ComboBox Grid.Column="1" Header="데이터 파티션 파일시스템"
+                                      HorizontalAlignment="Stretch"
+                                      ItemsSource="{x:Bind VentoyViewModel.FileSystemOptions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind VentoyViewModel.SelectedFileSystemOption, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                        </Grid>
+                        <CheckBox Content="보안 부팅(Secure Boot) 비활성화"
+                                  IsChecked="{x:Bind VentoyViewModel.DisableSecureBoot, Mode=TwoWay}"
+                                  IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                        <StackPanel Spacing="2">
+                            <CheckBox Content="기존 데이터 유지(비파괴 설치)"
+                                      IsChecked="{x:Bind VentoyViewModel.NonDestructive, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Text="디스크를 지우지 않고 기존 파티션을 줄여서 그 공간에 끼워 넣습니다. 공간이 부족하면 실패할 수 있습니다." />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- 커스텀 ISO 안내 -->
+                <Border Style="{StaticResource TweakCardStyle}" Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="3. 커스텀 ISO 생성하기" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap"
+                                   Text="이 USB는 여기서 ISO를 만들지 않습니다. &quot;커스텀 ISO 만들기&quot; 메뉴로 가서 원하는 대로 ISO를 만든 다음, 위 USB(데이터 파티션)에 파일 탐색기로 그냥 복사해 넣으면 됩니다. 여러 개를 올려두면 부팅 시 메뉴에서 골라 설치할 수 있습니다." />
+                        <Button Content="커스텀 ISO 만들기로 이동" Click="OnGoToCustomIsoClick" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 실행 -->
+                <Border Style="{StaticResource TweakCardStyle}" Padding="16">
+                    <StackPanel Spacing="12">
+                        <Button Content="Ventoy 설치/업데이트" Style="{StaticResource AccentButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                Command="{x:Bind VentoyViewModel.CreateCommand}"
+                                IsEnabled="{x:Bind views:XamlHelpers.Not(VentoyViewModel.IsBusy), Mode=OneWay}" />
+                        <Grid Visibility="{x:Bind views:XamlHelpers.Show(VentoyViewModel.ShowProgressPanel), Mode=OneWay}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <TextBlock Text="{x:Bind VentoyViewModel.ProgressText, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                <ProgressBar Minimum="0" Maximum="100"
+                                             Value="{x:Bind VentoyViewModel.ProgressPercent, Mode=OneWay}"
+                                             IsIndeterminate="{x:Bind VentoyViewModel.IsProgressIndeterminate, Mode=OneWay}"
+                                             Height="8" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="취소"
+                                    Command="{x:Bind VentoyViewModel.CancelCommand}"
+                                    Visibility="{x:Bind views:XamlHelpers.Show(VentoyViewModel.CanCancel), Mode=OneWay}" />
+                        </Grid>
+                        <ListView ItemsSource="{x:Bind VentoyViewModel.LogLines, Mode=OneWay}" MaxHeight="200" SelectionMode="None"
+                                  Visibility="{x:Bind views:XamlHelpers.Show(VentoyViewModel.HasLogLines), Mode=OneWay}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{x:Bind}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Style="{StaticResource CommandBarBorderStyle}"
+                Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsRufusTabSelected), Mode=OneWay}">
             <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource CommandBarBorderStyle}"
+                Visibility="{x:Bind views:XamlHelpers.Show(ViewModel.IsVentoyTabSelected), Mode=OneWay}">
+            <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       Text="{x:Bind VentoyViewModel.StatusMessage, Mode=OneWay}" />
         </Border>
     </Grid>
 </Page>

@@ -119,6 +119,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
     public ObservableCollection<CustomIsoTweakGroup> TweakGroups { get; } = [];
     public ObservableCollection<AppxPackageInfo> DebloatPackages { get; } = [];
     public ObservableCollection<WindowsImageInfo> Editions { get; } = [];
+    public ObservableCollection<string> LanguageOptions { get; } = [.. InstallLanguageOptions.DisplayNames];
     public ObservableCollection<string> LogLines { get; } = [];
 
     [ObservableProperty]
@@ -129,6 +130,10 @@ public sealed partial class CustomIsoViewModel : ObservableObject
 
     [ObservableProperty]
     public partial WindowsImageInfo? SelectedEdition { get; set; }
+
+    /// <summary>설치 언어 드롭다운 선택 표시 문자열. 기본값은 "자동"(원본 ISO 언어 감지).</summary>
+    [ObservableProperty]
+    public partial string SelectedLanguageOption { get; set; } = InstallLanguageOptions.Auto;
 
     [ObservableProperty]
     public partial bool OscdimgAvailable { get; set; }
@@ -488,6 +493,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
             + $"원본: {SourceIsoPath}\n"
             + $"저장: {OutputIsoPath}\n"
             + $"에디션: {SelectedEdition.DisplayText}\n"
+            + $"설치 언어: {SelectedLanguageOption}\n"
             + $"트윅: {selectedTweaks.Count}개 · 앱 제거: {selectedApps.Count}개\n"
             + (extras.Count > 0 ? $"추가: {string.Join(" · ", extras)}\n" : string.Empty)
             + "\n"
@@ -528,6 +534,7 @@ public sealed partial class CustomIsoViewModel : ObservableObject
                 localName,
                 SkipOnlineAccount && EnableAutoLogon,
                 SkipOnlineAccount && EnableAutoLogon ? LocalAccountPassword : string.Empty,
+                InstallLanguageOptions.ToLocaleCode(SelectedLanguageOption),
                 progress,
                 ct);
 
@@ -592,27 +599,43 @@ public sealed partial class CustomIsoViewModel : ObservableObject
         }
         catch (ElevationDeniedException)
         {
-            StatusMessage = "관리자 권한이 거부되었습니다.";
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "관리자 권한이 거부되었습니다.";
+                AppendLog(StatusMessage);
+            });
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "취소되었습니다.";
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "취소되었습니다.";
+                AppendLog(StatusMessage);
+            });
         }
         catch (Exception ex)
         {
-            StatusMessage = "실패: " + ex.Message;
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "실패: " + ex.Message;
+                AppendLog(StatusMessage);
+            });
             await _dialog.ShowMessageAsync("커스텀 ISO 오류", ex.Message);
         }
         finally
         {
-            IsBusy = false;
-            IsProgressIndeterminate = false;
+            // work(progress, ct) 내부 서비스 체인이 ConfigureAwait(false)를 쓰기 때문에
+            // 여기가 UI 스레드가 아닐 수 있다 — IsBusy 를 그대로 바꾸면 NavView.IsEnabled 등
+            // XAML 요소를 다른 스레드에서 건드려 RPC_E_WRONG_THREAD 로 즉시 프로세스가 죽는다
+            // (Microsoft.UI.Windowing.dll fail-fast, 실측 확인됨). 반드시 UiThread 를 거친다.
+            await UiThread.InvokeAsync(() =>
+            {
+                IsBusy = false;
+                IsProgressIndeterminate = false;
+                NotifyProgressProps();
+            });
             _cts.Dispose();
             _cts = null;
-            NotifyProgressProps();
         }
     }
 

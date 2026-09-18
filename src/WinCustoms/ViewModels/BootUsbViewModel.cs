@@ -94,6 +94,27 @@ public sealed partial class BootUsbViewModel : ObservableObject
         "Rufus처럼 USB/외장 디스크에 Windows 설치 미디어를 만듭니다. "
         + "기본은 순정 그대로이며, 최적화 설정을 켜면 트윅·앱 제거·OOBE를 적용할 수 있습니다.";
 
+    /// <summary>상단 [Rufus 스타일]/[Ventoy 스타일] 탭. 기본은 Rufus(기존 화면 그대로).</summary>
+    [ObservableProperty]
+    public partial bool IsRufusTabSelected { get; set; } = true;
+
+    [ObservableProperty]
+    public partial bool IsVentoyTabSelected { get; set; }
+
+    public void SelectRufusTab()
+    {
+        if (IsRufusTabSelected) return;
+        IsRufusTabSelected = true;
+        IsVentoyTabSelected = false;
+    }
+
+    public void SelectVentoyTab()
+    {
+        if (IsVentoyTabSelected) return;
+        IsVentoyTabSelected = true;
+        IsRufusTabSelected = false;
+    }
+
     public ObservableCollection<BootUsbDiskInfo> Disks { get; } = [];
     public ObservableCollection<string> PartitionSchemeOptions { get; } = [];
     public ObservableCollection<string> FileSystemOptions { get; } = [];
@@ -102,6 +123,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
     public ObservableCollection<CustomIsoTweakGroup> TweakGroups { get; } = [];
     public ObservableCollection<AppxPackageInfo> DebloatPackages { get; } = [];
     public ObservableCollection<WindowsImageInfo> Editions { get; } = [];
+    public ObservableCollection<string> LanguageOptions { get; } = [.. InstallLanguageOptions.DisplayNames];
     public ObservableCollection<string> LogLines { get; } = [];
 
     [ObservableProperty]
@@ -112,6 +134,10 @@ public sealed partial class BootUsbViewModel : ObservableObject
 
     [ObservableProperty]
     public partial WindowsImageInfo? SelectedEdition { get; set; }
+
+    /// <summary>설치 언어 드롭다운 선택 표시 문자열. 기본값은 "자동"(원본 ISO 언어 감지).</summary>
+    [ObservableProperty]
+    public partial string SelectedLanguageOption { get; set; } = InstallLanguageOptions.Auto;
 
     [ObservableProperty]
     public partial string SelectedPartitionSchemeOption { get; set; } = "GPT";
@@ -632,6 +658,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
             + (edition is not null
                 ? $"에디션: {edition.DisplayText} (설치 시 자동 선택)\n"
                 : "에디션: 순정 그대로 (설치 화면에서 선택)\n")
+            + $"설치 언어: {SelectedLanguageOption}\n"
             + $"모드: {(optimize ? "최적화 설정 적용" : "순정 그대로")}\n"
             + $"파티션: {SelectedPartitionSchemeOption} · {TargetSystemText}\n"
             + $"파일 시스템: {SelectedFileSystemOption} · 레이블: {VolumeLabel}\n\n"
@@ -655,6 +682,7 @@ public sealed partial class BootUsbViewModel : ObservableObject
             SourceIsoPath = SourceIsoPath,
             ImageIndex = imageIndex,
             EditionName = edition?.Name ?? string.Empty,
+            LanguageOverride = InstallLanguageOptions.ToLocaleCode(SelectedLanguageOption),
             DiskNumber = SelectedDisk.Number,
             DiskFriendlyName = SelectedDisk.FriendlyName,
             DiskSizeBytes = SelectedDisk.SizeBytes,
@@ -736,27 +764,43 @@ public sealed partial class BootUsbViewModel : ObservableObject
         }
         catch (ElevationDeniedException)
         {
-            StatusMessage = "관리자 권한이 거부되었습니다.";
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "관리자 권한이 거부되었습니다.";
+                AppendLog(StatusMessage);
+            });
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "취소되었습니다.";
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "취소되었습니다.";
+                AppendLog(StatusMessage);
+            });
         }
         catch (Exception ex)
         {
-            StatusMessage = "실패: " + ex.Message;
-            AppendLog(StatusMessage);
+            await UiThread.InvokeAsync(() =>
+            {
+                StatusMessage = "실패: " + ex.Message;
+                AppendLog(StatusMessage);
+            });
             await _dialog.ShowMessageAsync("부팅 USB 오류", ex.Message);
         }
         finally
         {
-            IsBusy = false;
-            IsProgressIndeterminate = false;
+            // work(progress, ct) 내부 서비스 체인이 ConfigureAwait(false)를 쓰기 때문에
+            // 여기가 UI 스레드가 아닐 수 있다 — IsBusy 를 그대로 바꾸면 NavView.IsEnabled 등
+            // XAML 요소를 다른 스레드에서 건드려 RPC_E_WRONG_THREAD 로 즉시 프로세스가 죽는다
+            // (Microsoft.UI.Windowing.dll fail-fast, 실측 확인됨). 반드시 UiThread 를 거친다.
+            await UiThread.InvokeAsync(() =>
+            {
+                IsBusy = false;
+                IsProgressIndeterminate = false;
+                NotifyProgressProps();
+            });
             _cts.Dispose();
             _cts = null;
-            NotifyProgressProps();
         }
     }
 

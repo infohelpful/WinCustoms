@@ -8,3 +8,6 @@ dist/
 artifacts/
 Generated Files/
 *.binlog
+
+# 세션 인수인계/조사 메모 — 로컬 전용, 커밋하지 않음
+docs/

@@ -165,6 +165,7 @@ public static class BootUsbJobHost
         OutputIsoPath = Path.Combine(request.WorkDirectory, "_unused.iso"),
         ImageIndex = request.ImageIndex <= 0 ? 1 : request.ImageIndex,
         EditionName = request.EditionName ?? string.Empty,
+        LanguageOverride = request.LanguageOverride ?? string.Empty,
         WorkDirectory = request.WorkDirectory,
         RegistryOperations = request.RegistryOperations,
         AppxPackageNames = request.AppxPackageNames,

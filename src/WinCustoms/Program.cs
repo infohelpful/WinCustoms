@@ -30,6 +30,9 @@ public static class Program
         if (BootUsbJobHost.IsJobInvocation(args))
             return BootUsbJobHost.Run(args);
 
+        if (VentoyJobHost.IsJobInvocation(args))
+            return VentoyJobHost.Run(args);
+
         // UI 는 한 프로세스만. 이미 떠 있으면 기존 창을 앞으로 가져오고 종료.
         if (!SingleInstance.TryAcquire())
         {

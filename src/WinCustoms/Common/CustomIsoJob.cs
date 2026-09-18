@@ -12,6 +12,9 @@ public sealed class CustomIsoJobRequest
     /// <summary>install.wim 에디션 표시 이름(자동 설치·GVLK 선택용).</summary>
     public string EditionName { get; set; } = string.Empty;
 
+    /// <summary>설치 언어 수동 지정(ko-KR 등). 비어 있으면 원본 ISO 언어를 자동 감지한다.</summary>
+    public string LanguageOverride { get; set; } = string.Empty;
+
     public string WorkDirectory { get; set; } = string.Empty;
 
     public List<RegistryOperation> RegistryOperations { get; set; } = [];

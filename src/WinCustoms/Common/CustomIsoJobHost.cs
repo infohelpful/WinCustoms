@@ -237,7 +237,7 @@ public static class CustomIsoJobHost
                 {
                     ThrowIfCancelled(request);
                     Progress(request, 76, "OOBE 간편 설치(레지스트리) 적용...");
-                    var oobeOps = CustomIsoUnattend.BuildOfflineRegistryOps(request);
+                    var oobeOps = CustomIsoUnattend.BuildOfflineRegistryOps(extractDir, request);
                     if (oobeOps.Count > 0)
                         OfflineRegistryApplier.Apply(mountDir, oobeOps, m => Progress(request, null, m));
                 }
@@ -1048,7 +1048,10 @@ public static class CustomIsoJobHost
             throw new OperationCanceledException();
     }
 
-    private static void ClearReadOnlyAttribute(string? path)
+    /// <summary>ISO(UDF/CDFS)에서 robocopy로 복사된 파일은 ReadOnly 속성이 그대로 남아있어
+    /// File.WriteAllText/Delete가 UnauthorizedAccessException을 던진다. 그런 파일을 우리가
+    /// 다시 쓰기 전에는 항상 이걸 먼저 부른다.</summary>
+    internal static void ClearReadOnlyAttribute(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
         try
